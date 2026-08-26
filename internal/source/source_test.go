@@ -5,6 +5,8 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/session"
 )
 
 // fakeProcessChecker は指定した PID だけを生存扱いにする。
@@ -17,12 +19,18 @@ func (f fakeProcessChecker) Alive(pid int) bool {
 }
 
 func newTestSource(fsys fstest.MapFS, alivePIDs ...int) *Source {
+	return newTestSourceWithState(fsys, fstest.MapFS{}, alivePIDs...)
+}
+
+// newTestSourceWithState は action-required 状態ファイルの木も指定できる版。
+func newTestSourceWithState(fsys, stateFsys fstest.MapFS, alivePIDs ...int) *Source {
 	alive := make(map[int]bool)
 	for _, pid := range alivePIDs {
 		alive[pid] = true
 	}
 	return &Source{
 		fsys:           fsys,
+		stateFsys:      stateFsys,
 		proc:           fakeProcessChecker{alive: alive},
 		now:            func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) },
 		activityCache:  make(map[string]activityCache),
@@ -169,5 +177,71 @@ func Test_LoadActivity_MultipleAITitles_UsesLastOne(t *testing.T) {
 
 	if aiTitle != "更新後のタイトル" {
 		t.Errorf("aiTitle = %q, want %q（末尾から見て最後の ai-title を採用すべき）", aiTitle, "更新後のタイトル")
+	}
+}
+
+func Test_Load_ActionRequiredStateFile_IsReflectedInDerivedState(t *testing.T) {
+	fsys := fstest.MapFS{
+		"sessions/1001.json": &fstest.MapFile{
+			Data: []byte(registryJSON(1001, "aaa", "/tmp/proj", "busy")),
+		},
+	}
+	stateFsys := fstest.MapFS{
+		"sessions/aaa.json": &fstest.MapFile{
+			Data: []byte(`{"sessionId":"aaa","updatedAt":"2026-01-01T00:00:00Z"}`),
+		},
+	}
+	src := newTestSourceWithState(fsys, stateFsys, 1001)
+
+	result := src.Load()
+
+	if len(result.Sessions) != 1 {
+		t.Fatalf("Sessions = %d 件, want 1", len(result.Sessions))
+	}
+	if got := result.Sessions[0].State; got != session.StateActionRequired {
+		t.Errorf("State = %v, want StateActionRequired", got)
+	}
+}
+
+func Test_Load_ActionRequiredFileForUnknownSession_IsIgnored(t *testing.T) {
+	fsys := fstest.MapFS{
+		"sessions/1001.json": &fstest.MapFile{
+			Data: []byte(registryJSON(1001, "aaa", "/tmp/proj", "idle")),
+		},
+	}
+	// registry に存在しない sessionId（孤児ファイル）。
+	stateFsys := fstest.MapFS{
+		"sessions/orphan.json": &fstest.MapFile{
+			Data: []byte(`{"sessionId":"orphan","updatedAt":"2026-01-01T00:00:00Z"}`),
+		},
+	}
+	src := newTestSourceWithState(fsys, stateFsys, 1001)
+
+	result := src.Load()
+
+	if len(result.Sessions) != 1 {
+		t.Fatalf("Sessions = %d 件, want 1", len(result.Sessions))
+	}
+	if got := result.Sessions[0].State; got != session.StateIdle {
+		t.Errorf("State = %v, want StateIdle（孤児の状態ファイルは無視されるべき）", got)
+	}
+}
+
+func Test_Load_NoStateDir_FallsBackToRawStatus(t *testing.T) {
+	fsys := fstest.MapFS{
+		"sessions/1001.json": &fstest.MapFile{
+			Data: []byte(registryJSON(1001, "aaa", "/tmp/proj", "idle")),
+		},
+	}
+	// stateFsys が空（hook 未設定を模す）。
+	src := newTestSourceWithState(fsys, fstest.MapFS{}, 1001)
+
+	result := src.Load()
+
+	if len(result.Sessions) != 1 {
+		t.Fatalf("Sessions = %d 件, want 1", len(result.Sessions))
+	}
+	if got := result.Sessions[0].State; got != session.StateIdle {
+		t.Errorf("State = %v, want StateIdle（hook 未設定でも従来通り動くべき）", got)
 	}
 }

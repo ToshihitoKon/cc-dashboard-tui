@@ -14,6 +14,11 @@ type Source struct {
 	proc ProcessChecker
 	now  func() time.Time
 
+	// stateFsys は hookstate パッケージが書き込む action-required 状態
+	// ファイルの木。fsys（~/.claude 相当）とは別の場所（XDG state
+	// ディレクトリ）を指す。hook 未設定なら中身が空でもよい。
+	stateFsys fs.FS
+
 	// activityCache は jsonl の mtime をキーにした ai-title の再抽出防止キャッシュ。
 	// key は sessionID。
 	activityCache map[string]activityCache
@@ -33,6 +38,7 @@ type branchCacheEntry struct {
 func New(root string) *Source {
 	return &Source{
 		fsys:           newDirFS(root),
+		stateFsys:      newStateFS(),
 		proc:           NewOSProcessChecker(),
 		now:            time.Now,
 		activityCache:  make(map[string]activityCache),
@@ -55,6 +61,8 @@ type LoadResult struct {
 // 生存しているセッションを指す（登録だけ残って終了しているケースを除く）。
 func (s *Source) Load() LoadResult {
 	entries, errs := readRegistry(s.fsys)
+	actionRequiredTimes := loadActionRequiredTimes(s.stateFsys)
+	now := s.now()
 
 	var sessions []session.Session
 	for _, e := range entries {
@@ -78,7 +86,12 @@ func (s *Source) Load() LoadResult {
 			LastActivity: lastActivity,
 			GitBranch:    s.branchOf(e.CWD),
 		}
-		sess.State = session.DeriveState(sess.RawStatus, sess.LastActivity, s.now())
+		sess.State = session.DeriveState(session.StateInput{
+			RawStatus:        sess.RawStatus,
+			LastActivity:     sess.LastActivity,
+			Now:              now,
+			ActionRequiredAt: actionRequiredTimes[e.SessionID], // 無ければゼロ値
+		})
 		sessions = append(sessions, sess)
 	}
 

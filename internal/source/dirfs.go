@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/xdgstate"
 )
 
 // newDirFS は root を fs.FS として開く。
@@ -21,4 +23,18 @@ func newDirFS(root string) fs.FS {
 		resolved = root
 	}
 	return os.DirFS(resolved)
+}
+
+// unresolvableStateDir は XDG state ディレクトリが解決できなかった場合に
+// 使う、存在しないことが保証されたパス。fs.ReadDir が fs.ErrNotExist を
+// 返すだけになり、hook 機能が使えないだけで致命的にはならない。
+const unresolvableStateDir = "/nonexistent-cc-dashboard-tui-state-dir"
+
+// newStateFS は action-required 状態ファイル用の fs.FS を開く。
+func newStateFS() fs.FS {
+	dir := xdgstate.ResolveDir()
+	if dir == "" {
+		dir = unresolvableStateDir
+	}
+	return os.DirFS(dir)
 }

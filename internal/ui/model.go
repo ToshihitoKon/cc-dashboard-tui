@@ -221,6 +221,9 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 // 誤判定されることがあり、ライトテーマ対応は別途検討する。
 func statusStyle(state session.DisplayState) lipgloss.Style {
 	switch state {
+	case session.StateActionRequired:
+		// 対応が必要な行は他のどの状態よりも目立たせる（赤・太字）。
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
 	case session.StateBusy:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // 明るい緑
 	case session.StateBusyStale:

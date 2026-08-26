@@ -47,6 +47,35 @@ func Test_RunNotifyHook_PostToolUse_ClearsStateFile(t *testing.T) {
 	}
 }
 
+func Test_RunNotifyHook_SubagentPostToolUse_DoesNotClearMainSessionStateFile(t *testing.T) {
+	// PreToolUse/PostToolUse はサブエージェント実行中も同じ session_id で
+	// 発火する。agent_id が付いている＝サブエージェント由来のイベントで
+	// メインの action-required を消してはいけない。
+	dir := t.TempDir()
+	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
+	runNotifyHook(strings.NewReader(write), dir, time.Now())
+
+	subagentEvent := `{"session_id":"abc-123","hook_event_name":"PostToolUse","agent_id":"deadbeef"}`
+	runNotifyHook(strings.NewReader(subagentEvent), dir, time.Now())
+
+	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); err != nil {
+		t.Errorf("サブエージェント由来の PostToolUse で状態ファイルが消えるべきではない: %v", err)
+	}
+}
+
+func Test_RunNotifyHook_SubagentPreToolUse_DoesNotClearMainSessionStateFile(t *testing.T) {
+	dir := t.TempDir()
+	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
+	runNotifyHook(strings.NewReader(write), dir, time.Now())
+
+	subagentEvent := `{"session_id":"abc-123","hook_event_name":"PreToolUse","agent_id":"deadbeef"}`
+	runNotifyHook(strings.NewReader(subagentEvent), dir, time.Now())
+
+	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); err != nil {
+		t.Errorf("サブエージェント由来の PreToolUse で状態ファイルが消えるべきではない: %v", err)
+	}
+}
+
 func Test_RunNotifyHook_UserRejectedViaPreToolUse_ClearsStateFile(t *testing.T) {
 	// ユーザーが拒否した場合、PostToolUse は来ずに次の PreToolUse や
 	// UserPromptSubmit が来ることがある（約19%のケース）。これらでも

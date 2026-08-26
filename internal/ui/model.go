@@ -141,7 +141,7 @@ func contentHeight(totalHeight int) int {
 
 func (m Model) View() string {
 	if !m.ready {
-		return "起動中...\n"
+		return "starting...\n"
 	}
 	title := lipgloss.NewStyle().Bold(true).Render(
 		fmt.Sprintf("cc-dashboard-tui — %d session(s) running", len(m.sessions)))
@@ -162,7 +162,7 @@ func (m Model) footerText() string {
 
 func (m Model) render() string {
 	if len(m.sessions) == 0 {
-		return "実行中の Claude Code セッションはありません。"
+		return "No running Claude Code sessions."
 	}
 
 	now := time.Now()

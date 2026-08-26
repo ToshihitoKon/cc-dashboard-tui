@@ -50,23 +50,23 @@ func runHookStatus() {
 
 	registered := readRegisteredHookEvents(settingsPath)
 
-	fmt.Println("action required 検出用の hook 設定状況:")
+	fmt.Println("action-required hook status:")
 	var missing []string
 	for _, event := range requiredHookEvents {
 		if registered[event] {
 			fmt.Printf("  [ok] %s\n", event)
 		} else {
-			fmt.Printf("  [--] %s (未設定)\n", event)
+			fmt.Printf("  [--] %s (not configured)\n", event)
 			missing = append(missing, event)
 		}
 	}
 
 	if len(missing) == 0 {
-		fmt.Println("\nhook は全て設定済みです。")
+		fmt.Println("\nAll hooks are configured.")
 		return
 	}
 
-	fmt.Printf("\n%s の hooks に以下を追記してください（%s）:\n", settingsPath, exe)
+	fmt.Printf("\nAdd the following to the hooks in %s (using %s):\n", settingsPath, exe)
 	fmt.Println(buildHookSnippet(missing, exe))
 }
 
@@ -114,7 +114,7 @@ func buildHookSnippet(events []string, exe string) string {
 	}
 	data, err := json.MarshalIndent(snippet, "", "  ")
 	if err != nil {
-		return "(JSON の生成に失敗しました)"
+		return "(failed to generate JSON)"
 	}
 	return string(data)
 }

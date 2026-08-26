@@ -27,8 +27,9 @@ func main() {
 		return
 	}
 
-	root := flag.String("root", defaultRoot(), "Claude Code のセッション情報ディレクトリ（~/.claude 相当）")
-	dump := flag.Bool("dump", false, "TUI を起動せず、パース結果を1回だけ出力して終了する")
+	flag.Usage = printUsage
+	root := flag.String("root", defaultRoot(), "Claude Code session directory (defaults to ~/.claude)")
+	dump := flag.Bool("dump", false, "print parsed sessions once and exit, without starting the TUI")
 	flag.Parse()
 
 	src := source.New(*root)
@@ -42,6 +43,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "cc-dashboard-tui:", err)
 		os.Exit(1)
 	}
+}
+
+// printUsage は -h/--help で表示される内容。
+// サブコマンド（notify-hook/hook-status）は flag パッケージの管理外で
+// os.Args を直接見て分岐しているため、flag.PrintDefaults だけでは
+// 存在が案内されない。ここに明記して案内漏れを防ぐ。
+func printUsage() {
+	fmt.Fprintln(os.Stderr, "usage: cc-dashboard-tui [flags]")
+	fmt.Fprintln(os.Stderr, "\nflags:")
+	flag.PrintDefaults()
+	fmt.Fprintln(os.Stderr, "\nsubcommands:")
+	fmt.Fprintln(os.Stderr, "  hook-status   check whether the action-required hook is configured")
+	fmt.Fprintln(os.Stderr, "  notify-hook   entry point called by Claude Code's hooks (no need to run manually)")
 }
 
 func defaultRoot() string {

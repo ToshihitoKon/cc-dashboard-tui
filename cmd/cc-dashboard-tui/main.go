@@ -47,7 +47,7 @@ func runDump(src *source.Source) {
 	fmt.Printf("%d session(s)\n", len(result.Sessions))
 	for _, s := range result.Sessions {
 		fmt.Printf("- [%s] %s  pid=%d  cwd=%s  branch=%s  started=%s  lastActivity=%s\n",
-			s.State.Label(), s.DisplayName(), s.PID, s.CWD, s.GitBranch,
+			s.State.String(), s.DisplayName(), s.PID, s.CWD, s.GitBranch,
 			s.StartedAt.Format("15:04:05"), s.LastActivity.Format("15:04:05"))
 	}
 

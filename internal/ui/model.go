@@ -20,16 +20,15 @@ import (
 )
 
 // pollInterval はセッション一覧を再取得する間隔。
-// ファイル走査は mtime キャッシュにより軽量なので 1s でも問題ない。
-const pollInterval = 1 * time.Second
+// 経過時間表示の粒度もこれに従うため、頻繁すぎる更新は不要という
+// ユーザー判断により 10s にしている。
+const pollInterval = 10 * time.Second
 
-// spinnerInterval はスピナーのフレーム更新間隔。
-// ポーリングと同一 tick にすると busy 表示がカクつくため別 tick にする。
-const spinnerInterval = 100 * time.Millisecond
+// spinnerFrameInterval はスピナーの 1 フレームあたりの時間。
+// 3fps 相当（Braille 8 フレームで 1 周 約2.7秒）。
+const spinnerFrameInterval = time.Second / 3
 
 type sessionsMsg source.LoadResult
-
-type spinnerTickMsg time.Time
 
 // Model は TUI 全体の状態。
 type Model struct {
@@ -40,8 +39,6 @@ type Model struct {
 	viewport viewport.Model
 	spinner  spinner.Model
 	ready    bool // 最初の WindowSizeMsg を受け取るまで viewport は使えない
-
-	width, height int
 }
 
 // NewModel は Model を作る。
@@ -49,7 +46,7 @@ func NewModel(src *source.Source) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Spinner{
 		Frames: []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"},
-		FPS:    spinnerInterval,
+		FPS:    spinnerFrameInterval,
 	}
 	return Model{src: src, spinner: sp}
 }
@@ -78,7 +75,6 @@ func scheduleNextPoll(src *source.Source) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, contentHeight(msg.Height))
 			m.ready = true
@@ -108,11 +104,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
+		// tick チェーンは busy の有無にかかわらず必ず継続させる。
+		// ここで cmd を返さず止めると、後で busy セッションが現れたときに
+		// チェーンを再起動する経路が必要になり、tick が重複しやすくなる。
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.ready {
-			// スピナーのフレームが進むたびに再描画する。
-			// busy なセッションが 0 件でも spinner.Tick 自体は動き続けるが、
-			// 表示に使われないだけなので実害はない。
+		if m.ready && m.hasSpinningSession() {
+			// 経過時間ラベルは pollInterval 側の更新で十分なので、
+			// ここでの再描画は busy セッションのアニメーションのためだけに行う。
 			m.viewport.SetContent(m.render())
 		}
 		return m, cmd
@@ -120,9 +118,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// hasSpinningSession は現在 busy 表示（スピナー使用）のセッションが
+// 1 件でもあるかを返す。
+func (m Model) hasSpinningSession() bool {
+	for _, s := range m.sessions {
+		if s.State.NeedsSpinner() {
+			return true
+		}
+	}
+	return false
+}
+
 // contentHeight はヘッダ・フッタ分を引いた viewport の高さ。
 func contentHeight(totalHeight int) int {
-	const chromeLines = 2 // ヘッダ1行 + フッタ1行
+	const chromeLines = 3 // タイトル1行 + 列見出し1行 + フッタ1行
 	h := totalHeight - chromeLines
 	if h < 1 {
 		h = 1
@@ -134,10 +143,11 @@ func (m Model) View() string {
 	if !m.ready {
 		return "起動中...\n"
 	}
-	header := lipgloss.NewStyle().Bold(true).Render(
+	title := lipgloss.NewStyle().Bold(true).Render(
 		fmt.Sprintf("cc-dashboard-tui — %d session(s) running", len(m.sessions)))
+	header := columnHeader()
 	footer := footerStyle.Render(m.footerText())
-	return header + "\n" + m.viewport.View() + "\n" + footer
+	return title + "\n" + header + "\n" + m.viewport.View() + "\n" + footer
 }
 
 var footerStyle = lipgloss.NewStyle().Faint(true)
@@ -166,6 +176,31 @@ func (m Model) render() string {
 	return b.String()
 }
 
+// カラム幅。日本語（表示幅2）が混ざっても揃うよう、パディングは
+// fmt の %-Ns（rune 数基準）ではなく lipgloss.Style.Width（表示幅基準）で行う。
+const (
+	statusColWidth  = 13 // 例: "● run (999s)"
+	titleColWidth   = 28
+	startedColWidth = 8 // 例: "2h ago"
+)
+
+var (
+	statusColStyle  = lipgloss.NewStyle().Width(statusColWidth)
+	titleColStyle   = lipgloss.NewStyle().Width(titleColWidth)
+	startedColStyle = lipgloss.NewStyle().Width(startedColWidth).Align(lipgloss.Right)
+)
+
+// columnHeader は render() の列（status, title, started）に
+// 対応する見出し行。viewport の外（スクロールされない領域）に置く。
+func columnHeader() string {
+	cells := []string{
+		statusColStyle.Render("status"),
+		titleColStyle.Render("title"),
+		startedColStyle.Render("started"),
+	}
+	return footerStyle.Render(strings.Join(cells, "  "))
+}
+
 func (m Model) renderSession(s session.Session, now time.Time) string {
 	icon := s.State.Icon()
 	if s.State.NeedsSpinner() {
@@ -173,23 +208,30 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 	}
 
 	elapsed := session.FormatElapsed(now.Sub(s.LastActivity))
-	statusText := fmt.Sprintf("%s %s (%s)", icon, s.State.Label(), elapsed)
+	statusCell := statusColStyle.Render(fmt.Sprintf("%s %s (%s)", icon, s.State.Label(), elapsed))
+	titleCell := titleColStyle.Render(truncate(s.DisplayName(), titleColWidth))
+	startedCell := startedColStyle.Render(session.FormatElapsed(now.Sub(s.StartedAt)) + " ago")
 
-	line := fmt.Sprintf("%-28s  %-16s  started %s",
-		truncate(s.DisplayName(), 28), statusText, s.StartedAt.Format("15:04:05"))
+	line := strings.Join([]string{statusCell, titleCell, startedCell}, "  ")
 	return statusStyle(s.State).Render(line)
 }
 
+// 現状はダーク背景のターミナル専用に固定色を使う。
+// lipgloss.AdaptiveColor は背景色の自動判定に依存するため環境によって
+// 誤判定されることがあり、ライトテーマ対応は別途検討する。
 func statusStyle(state session.DisplayState) lipgloss.Style {
 	switch state {
 	case session.StateBusy:
-		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "22", Dark: "42"})
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // 明るい緑
 	case session.StateBusyStale:
-		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "130", Dark: "220"})
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // 明るい黄
 	case session.StateIdle:
-		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "244", Dark: "244"})
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")) // 明るいグレー（本文相当の視認性）
 	default:
-		return lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "240", Dark: "238"})
+		// unknown はグレーの明度調整では idle と見分けが付かなくなるため、
+		// 明度ではなく色相を変える（暗めのシアン）。「idle より薄い」ではなく
+		// 「状態が分からない」という別種の意味を持たせる。
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
 	}
 }
 

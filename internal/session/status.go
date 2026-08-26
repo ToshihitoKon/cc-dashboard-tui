@@ -52,8 +52,23 @@ func (s DisplayState) Icon() string {
 	}
 }
 
-// Label はステータスの短い説明。
+// Label はステータスの短い説明（3文字）。
+// TUI の限られた列幅向け。ログや --dump 等の詳細表示には String を使う。
 func (s DisplayState) Label() string {
+	switch s {
+	case StateBusy:
+		return "run"
+	case StateBusyStale:
+		return "stl"
+	case StateIdle:
+		return "idl"
+	default:
+		return "unk"
+	}
+}
+
+// String はステータスの人間可読な説明（フル表記）。
+func (s DisplayState) String() string {
 	switch s {
 	case StateBusy:
 		return "running..."

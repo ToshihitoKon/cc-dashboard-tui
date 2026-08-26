@@ -41,19 +41,17 @@ type StateInput struct {
 
 // DeriveState はセッションの表示ステータスを決める。
 //
-// registry の status 単独では busy/idle の2値しか分からないため、
-// jsonl の鮮度（staleThreshold）と hook 由来の action-required 情報
-// （actionRequiredTTL）を組み合わせて判定する。
+// registry の status が "busy" の場合、それが本当に処理中なのか
+// パーミッション確認待ちで止まっているのかを registry だけでは
+// 区別できない。hook 由来の action-required 情報（あれば）はこの
+// 一点を補うためだけに参照する。idle/unknown は registry だけで
+// 判断が完結するため hook を見ない。
 func DeriveState(in StateInput) DisplayState {
-	if !in.ActionRequiredAt.IsZero() && in.Now.Sub(in.ActionRequiredAt) <= actionRequiredTTL {
-		// パーミッション確認待ちは registry 上まだ "busy" のことが多い。
-		// busy/stale の判定より優先しないと、通知直後は running と
-		// 誤表示されてしまう（この機能が解消したい問題そのもの）。
-		return StateActionRequired
-	}
-
 	switch in.RawStatus {
 	case "busy":
+		if !in.ActionRequiredAt.IsZero() && in.Now.Sub(in.ActionRequiredAt) <= actionRequiredTTL {
+			return StateActionRequired
+		}
 		if in.Now.Sub(in.LastActivity) > staleThreshold {
 			return StateBusyStale
 		}

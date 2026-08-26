@@ -77,7 +77,7 @@ func Test_DeriveState_ActionRequiredAtThresholdBoundary_StillActionRequired(t *t
 	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
 
 	got := DeriveState(StateInput{
-		RawStatus:        "idle",
+		RawStatus:        "busy",
 		LastActivity:     now,
 		Now:              now,
 		ActionRequiredAt: now.Add(-actionRequiredTTL), // ちょうど TTL は境界内
@@ -92,14 +92,14 @@ func Test_DeriveState_ActionRequiredBeyondTTL_FallsBackToRawStatus(t *testing.T)
 	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
 
 	got := DeriveState(StateInput{
-		RawStatus:        "idle",
+		RawStatus:        "busy",
 		LastActivity:     now,
 		Now:              now,
 		ActionRequiredAt: now.Add(-actionRequiredTTL - time.Second),
 	})
 
-	if got != StateIdle {
-		t.Errorf("DeriveState() = %v, want StateIdle（TTL 超過で通常判定にフォールバックすべき）", got)
+	if got != StateBusy {
+		t.Errorf("DeriveState() = %v, want StateBusy（TTL 超過で通常判定にフォールバックすべき）", got)
 	}
 }
 
@@ -111,6 +111,24 @@ func Test_DeriveState_NoActionRequiredFile_FallsBackToRawStatus(t *testing.T) {
 
 	if got != StateBusy {
 		t.Errorf("DeriveState() = %v, want StateBusy", got)
+	}
+}
+
+func Test_DeriveState_ActionRequiredFileButRawStatusIdle_IsIgnored(t *testing.T) {
+	// idle は registry だけで判断が完結するため、hook の情報を見ない。
+	// （実務上 idle のときに action-required ファイルが残っているのは
+	// 解除漏れのはずだが、その場合も registry の値をそのまま信頼する）
+	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
+
+	got := DeriveState(StateInput{
+		RawStatus:        "idle",
+		LastActivity:     now,
+		Now:              now,
+		ActionRequiredAt: now.Add(-time.Minute),
+	})
+
+	if got != StateIdle {
+		t.Errorf("DeriveState() = %v, want StateIdle（idle のときは hook を見ないべき）", got)
 	}
 }
 

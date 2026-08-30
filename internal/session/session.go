@@ -22,6 +22,7 @@ type Session struct {
 
 	// jsonl 由来
 	AITitle      string
+	Model        string    // 最後に使われたモデル名（/model 等で変わりうる）。取得不可なら空文字
 	LastActivity time.Time // max(本体 jsonl, subagents/*.jsonl) の mtime
 
 	// 派生

@@ -150,7 +150,7 @@ func Test_LoadActivity_SubagentNewerThanParent_UsesSubagentMtime(t *testing.T) {
 	}
 	src := newTestSource(fsys)
 
-	lastActivity, aiTitle := src.loadActivity("/tmp/proj", "aaa")
+	lastActivity, aiTitle, _ := src.loadActivity("/tmp/proj", "aaa")
 
 	if !lastActivity.Equal(subagentTime) {
 		t.Errorf("lastActivity = %v, want %v（subagent の mtime が優先されるべき）", lastActivity, subagentTime)
@@ -173,10 +173,73 @@ func Test_LoadActivity_MultipleAITitles_UsesLastOne(t *testing.T) {
 	}
 	src := newTestSource(fsys)
 
-	_, aiTitle := src.loadActivity("/tmp/proj", "aaa")
+	_, aiTitle, _ := src.loadActivity("/tmp/proj", "aaa")
 
 	if aiTitle != "更新後のタイトル" {
 		t.Errorf("aiTitle = %q, want %q（末尾から見て最後の ai-title を採用すべき）", aiTitle, "更新後のタイトル")
+	}
+}
+
+func Test_LoadActivity_MultipleModels_UsesLastOne(t *testing.T) {
+	// /model コマンド等でセッション中にモデルが変わりうる。
+	fsys := fstest.MapFS{
+		"projects/-tmp-proj/aaa.jsonl": &fstest.MapFile{
+			Data: []byte(
+				`{"type":"assistant","message":{"model":"claude-opus-5"}}` + "\n" +
+					`{"type":"user"}` + "\n" +
+					`{"type":"assistant","message":{"model":"claude-sonnet-5"}}` + "\n",
+			),
+			ModTime: time.Now(),
+		},
+	}
+	src := newTestSource(fsys)
+
+	_, _, model := src.loadActivity("/tmp/proj", "aaa")
+
+	if model != "claude-sonnet-5" {
+		t.Errorf("model = %q, want %q（最後に見つかったモデルを採用すべき）", model, "claude-sonnet-5")
+	}
+}
+
+func Test_LoadActivity_SyntheticModel_IsIgnored(t *testing.T) {
+	// <synthetic> は実際のモデル推論を経ていない内部的な合成応答に付く値で、
+	// 表示すべきモデル名ではない。
+	fsys := fstest.MapFS{
+		"projects/-tmp-proj/aaa.jsonl": &fstest.MapFile{
+			Data: []byte(
+				`{"type":"assistant","message":{"model":"claude-sonnet-5"}}` + "\n" +
+					`{"type":"assistant","message":{"model":"<synthetic>"}}` + "\n",
+			),
+			ModTime: time.Now(),
+		},
+	}
+	src := newTestSource(fsys)
+
+	_, _, model := src.loadActivity("/tmp/proj", "aaa")
+
+	if model != "claude-sonnet-5" {
+		t.Errorf("model = %q, want %q（<synthetic> は無視し、直前の有効な値を保持すべき）", model, "claude-sonnet-5")
+	}
+}
+
+func Test_LoadActivity_SidechainAssistant_IsIgnored(t *testing.T) {
+	// サブエージェントのログは別ファイル（subagents/*.jsonl）に書かれ、
+	// 本体 jsonl に混在しないはずだが、isSidechain のチェックを保険として持つ。
+	fsys := fstest.MapFS{
+		"projects/-tmp-proj/aaa.jsonl": &fstest.MapFile{
+			Data: []byte(
+				`{"type":"assistant","message":{"model":"claude-sonnet-5"}}` + "\n" +
+					`{"type":"assistant","isSidechain":true,"message":{"model":"claude-opus-5"}}` + "\n",
+			),
+			ModTime: time.Now(),
+		},
+	}
+	src := newTestSource(fsys)
+
+	_, _, model := src.loadActivity("/tmp/proj", "aaa")
+
+	if model != "claude-sonnet-5" {
+		t.Errorf("model = %q, want %q（isSidechain の行は無視すべき）", model, "claude-sonnet-5")
 	}
 }
 

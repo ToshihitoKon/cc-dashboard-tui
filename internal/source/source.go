@@ -70,7 +70,7 @@ func (s *Source) Load() LoadResult {
 			continue // registry が残っているだけの終了済みセッションは表示しない
 		}
 
-		lastActivity, aiTitle := s.loadActivity(e.CWD, e.SessionID)
+		lastActivity, aiTitle, model := s.loadActivity(e.CWD, e.SessionID)
 		procStart, _ := e.procStartTime()
 
 		sess := session.Session{
@@ -83,6 +83,7 @@ func (s *Source) Load() LoadResult {
 			Entrypoint:   e.Entrypoint,
 			RegistryName: e.RegistryName,
 			AITitle:      aiTitle,
+			Model:        model,
 			LastActivity: lastActivity,
 			GitBranch:    s.branchOf(e.CWD),
 		}

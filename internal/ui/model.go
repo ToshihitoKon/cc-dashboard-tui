@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/ToshihitoKon/cc-dashboard-tui/internal/session"
@@ -180,22 +180,25 @@ func (m Model) render() string {
 // fmt の %-Ns（rune 数基準）ではなく lipgloss.Style.Width（表示幅基準）で行う。
 const (
 	statusColWidth  = 13 // 例: "● run (999s)"
-	titleColWidth   = 28
-	startedColWidth = 8 // 例: "2h ago"
+	titleColWidth   = 22
+	modelColWidth   = 18 // 例: "claude-sonnet-4-5-20250929" は truncate で切り詰める
+	startedColWidth = 8  // 例: "2h ago"
 )
 
 var (
 	statusColStyle  = lipgloss.NewStyle().Width(statusColWidth)
 	titleColStyle   = lipgloss.NewStyle().Width(titleColWidth)
+	modelColStyle   = lipgloss.NewStyle().Width(modelColWidth)
 	startedColStyle = lipgloss.NewStyle().Width(startedColWidth).Align(lipgloss.Right)
 )
 
-// columnHeader は render() の列（status, title, started）に
+// columnHeader は render() の列（status, title, model, started）に
 // 対応する見出し行。viewport の外（スクロールされない領域）に置く。
 func columnHeader() string {
 	cells := []string{
 		statusColStyle.Render("status"),
 		titleColStyle.Render("title"),
+		modelColStyle.Render("model"),
 		startedColStyle.Render("started"),
 	}
 	return footerStyle.Render(strings.Join(cells, "  "))
@@ -210,9 +213,10 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 	elapsed := session.FormatElapsed(now.Sub(s.LastActivity))
 	statusCell := statusColStyle.Render(fmt.Sprintf("%s %s (%s)", icon, s.State.Label(), elapsed))
 	titleCell := titleColStyle.Render(truncate(s.DisplayName(), titleColWidth))
+	modelCell := modelColStyle.Render(truncate(modelOrPlaceholder(s.Model), modelColWidth))
 	startedCell := startedColStyle.Render(session.FormatElapsed(now.Sub(s.StartedAt)) + " ago")
 
-	line := strings.Join([]string{statusCell, titleCell, startedCell}, "  ")
+	line := strings.Join([]string{statusCell, titleCell, modelCell, startedCell}, "  ")
 	return statusStyle(s.State).Render(line)
 }
 
@@ -236,6 +240,15 @@ func statusStyle(state session.DisplayState) lipgloss.Style {
 		// 「状態が分からない」という別種の意味を持たせる。
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("117"))
 	}
+}
+
+// modelOrPlaceholder はモデル名が取得できない場合（sdk-cli 起動セッション等）に
+// 空白の列ではなく分かりやすいプレースホルダーを出す。
+func modelOrPlaceholder(model string) string {
+	if model == "" {
+		return "-"
+	}
+	return model
 }
 
 // truncate は表示幅（マルチバイト考慮）で切り詰める。len は使わない。

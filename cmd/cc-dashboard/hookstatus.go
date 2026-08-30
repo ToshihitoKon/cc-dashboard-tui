@@ -45,7 +45,7 @@ func runHookStatus() {
 	settingsPath := filepath.Join(defaultRoot(), "settings.json")
 	exe, err := os.Executable()
 	if err != nil {
-		exe = "cc-dashboard-tui" // フォールバック。PATH が通っていない環境では動かない可能性がある旨は出力で補う
+		exe = "cc-dashboard" // フォールバック。PATH が通っていない環境では動かない可能性がある旨は出力で補う
 	}
 
 	registered := readRegisteredHookEvents(settingsPath)
@@ -101,7 +101,7 @@ func readRegisteredHookEvents(settingsPath string) map[string]bool {
 // isNotifyHookCommand はコマンド文字列が本アプリの notify-hook 呼び出しかを判定する。
 // 絶対パスや引数の付き方が環境で変わりうるため、部分一致で緩く判定する。
 func isNotifyHookCommand(command string) bool {
-	return strings.Contains(command, "cc-dashboard-tui") && strings.Contains(command, "notify-hook")
+	return strings.Contains(command, "cc-dashboard") && strings.Contains(command, "notify-hook")
 }
 
 // buildHookSnippet は不足イベント分の追記用 JSON 片を組み立てる。

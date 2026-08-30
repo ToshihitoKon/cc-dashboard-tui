@@ -19,7 +19,7 @@ func Test_ReadRegisteredHookEvents_RegisteredCommand_IsDetected(t *testing.T) {
 		"hooks": map[string]any{
 			"PostToolUse": []map[string]any{
 				{"hooks": []map[string]any{
-					{"type": "command", "command": "/usr/local/bin/cc-dashboard-tui notify-hook"},
+					{"type": "command", "command": "/usr/local/bin/cc-dashboard notify-hook"},
 				}},
 			},
 		},
@@ -62,7 +62,7 @@ func Test_ReadRegisteredHookEvents_PreservesUnrelatedHooksInSameEvent(t *testing
 					{"type": "command", "command": "~/.config/claude/custom_scripts/hook-logger.sh"},
 				}},
 				{"hooks": []map[string]any{
-					{"type": "command", "command": "cc-dashboard-tui notify-hook"},
+					{"type": "command", "command": "cc-dashboard notify-hook"},
 				}},
 			},
 		},
@@ -77,7 +77,7 @@ func Test_ReadRegisteredHookEvents_PreservesUnrelatedHooksInSameEvent(t *testing
 }
 
 func Test_BuildHookSnippet_ProducesValidJSON(t *testing.T) {
-	snippet := buildHookSnippet([]string{"Notification", "Stop"}, "/usr/local/bin/cc-dashboard-tui")
+	snippet := buildHookSnippet([]string{"Notification", "Stop"}, "/usr/local/bin/cc-dashboard")
 
 	var parsed map[string][]hookEventGroup
 	if err := json.Unmarshal([]byte(snippet), &parsed); err != nil {

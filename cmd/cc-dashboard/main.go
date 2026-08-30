@@ -1,4 +1,4 @@
-// Command cc-dashboard-tui は実行中の Claude Code セッション一覧を表示する TUI。
+// Command cc-dashboard は実行中の Claude Code セッション一覧を表示する TUI。
 package main
 
 import (
@@ -15,6 +15,10 @@ import (
 	"github.com/ToshihitoKon/cc-dashboard-tui/internal/xdgstate"
 )
 
+// version は goreleaser がビルド時に -ldflags "-X main.version=..." で埋め込む。
+// go build で直接ビルドした場合は "dev" のまま。
+var version = "dev"
+
 func main() {
 	// notify-hook は Claude Code の hook から高頻度で呼ばれる想定のため、
 	// flag パッケージのオーバーヘッドを避けて os.Args を直接見て分岐する。
@@ -30,7 +34,13 @@ func main() {
 	flag.Usage = printUsage
 	root := flag.String("root", defaultRoot(), "Claude Code session directory (defaults to ~/.claude)")
 	dump := flag.Bool("dump", false, "print parsed sessions once and exit, without starting the TUI")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	src := source.New(*root)
 
@@ -40,7 +50,7 @@ func main() {
 	}
 
 	if err := runTUI(src); err != nil {
-		fmt.Fprintln(os.Stderr, "cc-dashboard-tui:", err)
+		fmt.Fprintln(os.Stderr, "cc-dashboard:", err)
 		os.Exit(1)
 	}
 }
@@ -50,7 +60,7 @@ func main() {
 // os.Args を直接見て分岐しているため、flag.PrintDefaults だけでは
 // 存在が案内されない。ここに明記して案内漏れを防ぐ。
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "usage: cc-dashboard-tui [flags]")
+	fmt.Fprintln(os.Stderr, "usage: cc-dashboard [flags]")
 	fmt.Fprintln(os.Stderr, "\nflags:")
 	flag.PrintDefaults()
 	fmt.Fprintln(os.Stderr, "\nsubcommands:")

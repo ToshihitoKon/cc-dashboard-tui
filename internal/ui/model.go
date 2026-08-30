@@ -143,7 +143,7 @@ func (m Model) View() string {
 		return "starting...\n"
 	}
 	title := lipgloss.NewStyle().Bold(true).Render(
-		fmt.Sprintf("cc-dashboard-tui — %d session(s) running", len(m.sessions)))
+		fmt.Sprintf("cc-dashboard — %d session(s) running", len(m.sessions)))
 	header := columnHeader()
 	footer := footerStyle.Render(m.footerText())
 	return title + "\n" + header + "\n" + m.viewport.View() + "\n" + footer

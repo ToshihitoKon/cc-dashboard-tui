@@ -8,7 +8,7 @@ import (
 )
 
 // appDirName はこのアプリの state ディレクトリ名。
-const appDirName = "cc-dashboard-tui"
+const appDirName = "cc-dashboard"
 
 // Dir はアプリの state ディレクトリを返す。
 //

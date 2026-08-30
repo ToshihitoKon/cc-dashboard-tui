@@ -1,8 +1,7 @@
 // Package ui は bubbletea を使った TUI 表示を提供する。
 //
-// 現段階では「コアロジックが正しく動いていることの確認」を優先し、
-// テーブル整形やグルーピングの作り込みは行わない。一覧表示とスクロール、
-// ステータスの表示・更新のみを実装する。
+// 一覧はステータスでグルーピングして表示する（軸の切り替えは無く常時固定）。
+// テーブル整形（罫線付きの表組み）はまだ作り込んでいない。
 package ui
 
 import (
@@ -160,6 +159,12 @@ func (m Model) footerText() string {
 	return text
 }
 
+// render はセッション一覧を「状態ごとのグループ見出し + 行」の形で描画する。
+//
+// m.sessions は source.Load() 側で session.SortSessions 済み（状態優先度が
+// 主キー）なので、同じ状態の行は必ず連続している。見出しは「直前の要素と
+// State が変わった瞬間」に挿入するだけでよく、状態ごとに事前グループ化した
+// 中間データを作る必要はない。
 func (m Model) render() string {
 	if len(m.sessions) == 0 {
 		return "No running Claude Code sessions."
@@ -168,12 +173,37 @@ func (m Model) render() string {
 	now := time.Now()
 	var b strings.Builder
 	for i, s := range m.sessions {
-		if i > 0 {
+		if i == 0 || s.State != m.sessions[i-1].State {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(groupHeading(s.State, countInGroup(m.sessions, i)))
 			b.WriteString("\n")
 		}
 		b.WriteString(m.renderSession(s, now))
+		if i < len(m.sessions)-1 {
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
+}
+
+// countInGroup は m.sessions[start] から始まる同一 State の連続区間の長さを返す。
+func countInGroup(sessions []session.Session, start int) int {
+	state := sessions[start].State
+	n := 0
+	for i := start; i < len(sessions) && sessions[i].State == state; i++ {
+		n++
+	}
+	return n
+}
+
+var groupHeadingStyle = lipgloss.NewStyle().Faint(true)
+
+// groupHeading はグループ見出し行の文字列。列幅（statusColWidth 等）とは
+// 揃えない。テーブルの1行ではなく区切りとして表示するため。
+func groupHeading(state session.DisplayState, count int) string {
+	return groupHeadingStyle.Render(fmt.Sprintf("── %s (%d) ──", state.String(), count))
 }
 
 // カラム幅。日本語（表示幅2）が混ざっても揃うよう、パディングは
@@ -204,6 +234,14 @@ func columnHeader() string {
 	return footerStyle.Render(strings.Join(cells, "  "))
 }
 
+// longRunThreshold を超えて busy が続いている場合、行の色を変えて目立たせる。
+//
+// jsonl の mtime は完了したイベントの時刻でしかなく、長いツール呼び出し
+// 1回で数分間動かないことは通常運転でも起きる（stall 判定を廃止した理由）。
+// そのため「異常」の断定はできないが、単なる run の緑色のまま埋もれさせず
+// 「一応目に留めておく」程度の注意喚起として長さだけ別色にする。
+const longRunThreshold = 5 * time.Minute
+
 func (m Model) renderSession(s session.Session, now time.Time) string {
 	icon := s.State.Icon()
 	if s.State.NeedsSpinner() {
@@ -217,21 +255,23 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 	startedCell := startedColStyle.Render(session.FormatElapsed(now.Sub(s.StartedAt)) + " ago")
 
 	line := strings.Join([]string{statusCell, titleCell, modelCell, startedCell}, "  ")
-	return statusStyle(s.State).Render(line)
+	isLongRun := s.State == session.StateBusy && now.Sub(s.LastActivity) > longRunThreshold
+	return statusStyle(s.State, isLongRun).Render(line)
 }
 
 // 現状はダーク背景のターミナル専用に固定色を使う。
 // lipgloss.AdaptiveColor は背景色の自動判定に依存するため環境によって
 // 誤判定されることがあり、ライトテーマ対応は別途検討する。
-func statusStyle(state session.DisplayState) lipgloss.Style {
+func statusStyle(state session.DisplayState, isLongRun bool) lipgloss.Style {
 	switch state {
 	case session.StateActionRequired:
 		// 対応が必要な行は他のどの状態よりも目立たせる（赤・太字）。
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true)
 	case session.StateBusy:
+		if isLongRun {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // 明るい黄。長時間 busy への注意喚起
+		}
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("42")) // 明るい緑
-	case session.StateBusyStale:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("220")) // 明るい黄
 	case session.StateIdle:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")) // 明るいグレー（本文相当の視認性）
 	default:

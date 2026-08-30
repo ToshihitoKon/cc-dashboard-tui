@@ -49,6 +49,7 @@ func New(root string) *Source {
 
 // LoadResult は 1 回のポーリングの結果。
 type LoadResult struct {
+	// Sessions は session.SortSessions 済み（ユーザーの操作が必要な順）。
 	Sessions []session.Session
 	// Errors は個別ファイルの読み込み失敗（basename とエラー種別のみ）。
 	// 全体を止めるほどではない部分的な失敗を表示側に伝えるためのもの。
@@ -89,13 +90,13 @@ func (s *Source) Load() LoadResult {
 		}
 		sess.State = session.DeriveState(session.StateInput{
 			RawStatus:        sess.RawStatus,
-			LastActivity:     sess.LastActivity,
 			Now:              now,
 			ActionRequiredAt: actionRequiredTimes[e.SessionID], // 無ければゼロ値
 		})
 		sessions = append(sessions, sess)
 	}
 
+	session.SortSessions(sessions)
 	return LoadResult{Sessions: sessions, Errors: errs}
 }
 

@@ -5,43 +5,20 @@ import (
 	"time"
 )
 
-func Test_DeriveState_BusyWithinThreshold_ReturnsBusy(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)
-	lastActivity := now.Add(-59 * time.Second)
+func Test_DeriveState_Busy_ReturnsBusy(t *testing.T) {
+	now := time.Now()
 
-	got := DeriveState(StateInput{RawStatus: "busy", LastActivity: lastActivity, Now: now})
-
-	if got != StateBusy {
-		t.Errorf("DeriveState() = %v, want StateBusy", got)
-	}
-}
-
-func Test_DeriveState_BusyAtThresholdBoundary_ReturnsBusy(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 1, 0, 0, time.UTC)
-	lastActivity := now.Add(-staleThreshold) // ちょうど 60s は境界内（超過ではない）
-
-	got := DeriveState(StateInput{RawStatus: "busy", LastActivity: lastActivity, Now: now})
+	got := DeriveState(StateInput{RawStatus: "busy", Now: now})
 
 	if got != StateBusy {
 		t.Errorf("DeriveState() = %v, want StateBusy", got)
-	}
-}
-
-func Test_DeriveState_BusyBeyondThreshold_ReturnsBusyStale(t *testing.T) {
-	now := time.Date(2026, 1, 1, 0, 2, 0, 0, time.UTC)
-	lastActivity := now.Add(-61 * time.Second)
-
-	got := DeriveState(StateInput{RawStatus: "busy", LastActivity: lastActivity, Now: now})
-
-	if got != StateBusyStale {
-		t.Errorf("DeriveState() = %v, want StateBusyStale", got)
 	}
 }
 
 func Test_DeriveState_Idle_ReturnsIdle(t *testing.T) {
 	now := time.Now()
 
-	got := DeriveState(StateInput{RawStatus: "idle", LastActivity: now.Add(-time.Hour), Now: now})
+	got := DeriveState(StateInput{RawStatus: "idle", Now: now})
 
 	if got != StateIdle {
 		t.Errorf("DeriveState() = %v, want StateIdle", got)
@@ -51,7 +28,7 @@ func Test_DeriveState_Idle_ReturnsIdle(t *testing.T) {
 func Test_DeriveState_EmptyStatus_ReturnsUnknown(t *testing.T) {
 	now := time.Now()
 
-	got := DeriveState(StateInput{RawStatus: "", LastActivity: now, Now: now})
+	got := DeriveState(StateInput{RawStatus: "", Now: now})
 
 	if got != StateUnknown {
 		t.Errorf("DeriveState() = %v, want StateUnknown", got)
@@ -63,7 +40,6 @@ func Test_DeriveState_ActionRequiredWithinTTL_OverridesBusy(t *testing.T) {
 
 	got := DeriveState(StateInput{
 		RawStatus:        "busy", // 通知直後は registry 上まだ busy のことが多い
-		LastActivity:     now,
 		Now:              now,
 		ActionRequiredAt: now.Add(-time.Minute),
 	})
@@ -78,7 +54,6 @@ func Test_DeriveState_ActionRequiredAtThresholdBoundary_StillActionRequired(t *t
 
 	got := DeriveState(StateInput{
 		RawStatus:        "busy",
-		LastActivity:     now,
 		Now:              now,
 		ActionRequiredAt: now.Add(-actionRequiredTTL), // ちょうど TTL は境界内
 	})
@@ -93,7 +68,6 @@ func Test_DeriveState_ActionRequiredBeyondTTL_FallsBackToRawStatus(t *testing.T)
 
 	got := DeriveState(StateInput{
 		RawStatus:        "busy",
-		LastActivity:     now,
 		Now:              now,
 		ActionRequiredAt: now.Add(-actionRequiredTTL - time.Second),
 	})
@@ -107,7 +81,7 @@ func Test_DeriveState_NoActionRequiredFile_FallsBackToRawStatus(t *testing.T) {
 	now := time.Now()
 
 	// ActionRequiredAt をゼロ値のまま渡す = hook 未設定、または現在待ちなし
-	got := DeriveState(StateInput{RawStatus: "busy", LastActivity: now, Now: now})
+	got := DeriveState(StateInput{RawStatus: "busy", Now: now})
 
 	if got != StateBusy {
 		t.Errorf("DeriveState() = %v, want StateBusy", got)
@@ -122,7 +96,6 @@ func Test_DeriveState_ActionRequiredFileButRawStatusIdle_IsIgnored(t *testing.T)
 
 	got := DeriveState(StateInput{
 		RawStatus:        "idle",
-		LastActivity:     now,
 		Now:              now,
 		ActionRequiredAt: now.Add(-time.Minute),
 	})
@@ -138,7 +111,6 @@ func Test_DisplayState_NeedsSpinner_OnlyBusyIsTrue(t *testing.T) {
 		want  bool
 	}{
 		{StateBusy, true},
-		{StateBusyStale, false},
 		{StateIdle, false},
 		{StateUnknown, false},
 		{StateActionRequired, false},

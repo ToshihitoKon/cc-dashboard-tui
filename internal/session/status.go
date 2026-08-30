@@ -8,17 +8,9 @@ type DisplayState int
 const (
 	StateUnknown DisplayState = iota
 	StateBusy
-	StateBusyStale
 	StateIdle
 	StateActionRequired
 )
-
-// staleThreshold は busy 表示を信用しなくなるまでの猶予。
-//
-// registry の updatedAt はハートビートではなくイベント駆動で更新されるため、
-// プロセスが応答を返さないまま status:"busy" が残り続けることがある。
-// jsonl の mtime がこの時間を超えて動いていなければ、busy を額面通り扱わない。
-const staleThreshold = 60 * time.Second
 
 // actionRequiredTTL は action-required 状態ファイルを信用する期限。
 //
@@ -30,9 +22,8 @@ const actionRequiredTTL = 30 * time.Minute
 // StateInput は DeriveState への入力。フィールドを名前付きにすることで、
 // time.Time が複数並ぶことによる引数の取り違えを避ける。
 type StateInput struct {
-	RawStatus    string    // registry (sessions/<PID>.json) の status。欠損時は空文字
-	LastActivity time.Time // jsonl の mtime
-	Now          time.Time
+	RawStatus string // registry (sessions/<PID>.json) の status。欠損時は空文字
+	Now       time.Time
 
 	// ActionRequiredAt は action-required 状態ファイルの記録時刻。
 	// hook が未設定、または現在パーミッション確認待ちでなければゼロ値。
@@ -46,14 +37,17 @@ type StateInput struct {
 // 区別できない。hook 由来の action-required 情報（あれば）はこの
 // 一点を補うためだけに参照する。idle/unknown は registry だけで
 // 判断が完結するため hook を見ない。
+//
+// 注意: jsonl の mtime は「最後に完了したイベントの時刻」でしかなく、
+// 生成中かどうかのハートビートではない。長いツール呼び出し1回で
+// 数分間 mtime が動かないことは通常運転でも起きるため、busy を
+// 「最近ログが増えていない」だけで stale 扱いにする判定は持たない
+// （経過時間が長いことの表現は表示側 = ui パッケージの関心とする）。
 func DeriveState(in StateInput) DisplayState {
 	switch in.RawStatus {
 	case "busy":
 		if !in.ActionRequiredAt.IsZero() && in.Now.Sub(in.ActionRequiredAt) <= actionRequiredTTL {
 			return StateActionRequired
-		}
-		if in.Now.Sub(in.LastActivity) > staleThreshold {
-			return StateBusyStale
 		}
 		return StateBusy
 	case "idle":
@@ -70,8 +64,6 @@ func (s DisplayState) Icon() string {
 	switch s {
 	case StateBusy:
 		return "" // 呼び出し側がスピナーのフレームを入れる
-	case StateBusyStale:
-		return "◌"
 	case StateIdle:
 		return "●"
 	case StateActionRequired:
@@ -87,8 +79,6 @@ func (s DisplayState) Label() string {
 	switch s {
 	case StateBusy:
 		return "run"
-	case StateBusyStale:
-		return "stl"
 	case StateIdle:
 		return "idl"
 	case StateActionRequired:
@@ -103,8 +93,6 @@ func (s DisplayState) String() string {
 	switch s {
 	case StateBusy:
 		return "running..."
-	case StateBusyStale:
-		return "stalled?"
 	case StateIdle:
 		return "idle"
 	case StateActionRequired:
@@ -120,18 +108,17 @@ func (s DisplayState) NeedsSpinner() bool {
 }
 
 // SortOrder はステータス軸でグルーピングしたときのグループの並び順。
-// 辞書順ではなく「対応が必要な順」に並べたい。
+// 辞書順ではなく「ユーザーの操作が必要な順」に並べる。
+// action-required（操作待ち） → idle（操作可能） → run（操作不要、進行中） → unknown。
 func (s DisplayState) SortOrder() int {
 	switch s {
 	case StateActionRequired:
 		return 0
-	case StateBusy:
-		return 1
-	case StateBusyStale:
-		return 2
 	case StateIdle:
-		return 3
+		return 1
+	case StateBusy:
+		return 2
 	default:
-		return 4
+		return 3
 	}
 }

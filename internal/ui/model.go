@@ -180,8 +180,8 @@ func (m Model) render() string {
 // fmt の %-Ns（rune 数基準）ではなく lipgloss.Style.Width（表示幅基準）で行う。
 const (
 	statusColWidth  = 13 // 例: "● run (999s)"
-	titleColWidth   = 22
-	modelColWidth   = 18 // 例: "claude-sonnet-4-5-20250929" は truncate で切り詰める
+	titleColWidth   = 28
+	modelColWidth   = 14 // 表示は Session.DisplayModel() で正規化済み（例: "sonnet-4-5"）
 	startedColWidth = 8  // 例: "2h ago"
 )
 
@@ -213,7 +213,7 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 	elapsed := session.FormatElapsed(now.Sub(s.LastActivity))
 	statusCell := statusColStyle.Render(fmt.Sprintf("%s %s (%s)", icon, s.State.Label(), elapsed))
 	titleCell := titleColStyle.Render(truncate(s.DisplayName(), titleColWidth))
-	modelCell := modelColStyle.Render(truncate(modelOrPlaceholder(s.Model), modelColWidth))
+	modelCell := modelColStyle.Render(truncate(modelOrPlaceholder(s.DisplayModel()), modelColWidth))
 	startedCell := startedColStyle.Render(session.FormatElapsed(now.Sub(s.StartedAt)) + " ago")
 
 	line := strings.Join([]string{statusCell, titleCell, modelCell, startedCell}, "  ")

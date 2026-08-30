@@ -2,7 +2,11 @@
 // このパッケージは外部 I/O を一切持たず、純粋関数のみで構成される。
 package session
 
-import "time"
+import (
+	"regexp"
+	"strings"
+	"time"
+)
 
 // Session は表示対象となる 1 セッションの情報。
 //
@@ -43,4 +47,16 @@ func (s Session) DisplayName() string {
 		return s.SessionID[:8]
 	}
 	return s.SessionID
+}
+
+// modelDateSuffix は "claude-sonnet-4-5-20250929" のような日付付き ID の
+// 末尾 "-YYYYMMDD" 部分にマッチする。バージョン番号（"-4-5" 等）は
+// 桁数が異なるため誤って削らない。
+var modelDateSuffix = regexp.MustCompile(`-\d{8}$`)
+
+// DisplayModel はモデル名を列幅に収まる短い形に正規化する。
+// 例: "claude-sonnet-4-5-20250929" → "sonnet-4-5"
+func (s Session) DisplayModel() string {
+	m := strings.TrimPrefix(s.Model, "claude-")
+	return modelDateSuffix.ReplaceAllString(m, "")
 }

@@ -242,6 +242,12 @@ func columnHeader() string {
 // 「一応目に留めておく」程度の注意喚起として長さだけ別色にする。
 const longRunThreshold = 5 * time.Minute
 
+// isLongRun は busy 状態が longRunThreshold を超えて続いているかを返す。
+// busy 以外の状態には注意喚起の意味がないため常に false。
+func isLongRun(s session.Session, now time.Time) bool {
+	return s.State == session.StateBusy && now.Sub(s.LastActivity) > longRunThreshold
+}
+
 func (m Model) renderSession(s session.Session, now time.Time) string {
 	icon := s.State.Icon()
 	if s.State.NeedsSpinner() {
@@ -255,8 +261,7 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 	startedCell := startedColStyle.Render(session.FormatElapsed(now.Sub(s.StartedAt)) + " ago")
 
 	line := strings.Join([]string{statusCell, titleCell, modelCell, startedCell}, "  ")
-	isLongRun := s.State == session.StateBusy && now.Sub(s.LastActivity) > longRunThreshold
-	return statusStyle(s.State, isLongRun).Render(line)
+	return statusStyle(s.State, isLongRun(s, now)).Render(line)
 }
 
 // 現状はダーク背景のターミナル専用に固定色を使う。

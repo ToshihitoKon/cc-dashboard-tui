@@ -1,0 +1,52 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: cc-dashboard
+    main: ./cmd/cc-dashboard
+    binary: cc-dashboard
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: cc-dashboard
+    ids:
+      - cc-dashboard
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+
+brews:
+  - name: cc-dashboard
+    repository:
+      owner: ToshihitoKon
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/ToshihitoKon/cc-dashboard-tui
+    description: "実行中の Claude Code セッション一覧を表示する TUI"
+    license: MIT
+    install: |
+      bin.install "cc-dashboard"

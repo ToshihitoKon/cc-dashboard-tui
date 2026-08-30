@@ -44,6 +44,7 @@ cc-dashboard -root /path/to/claude/dir
 | --- | --- |
 | `-root` | Claude Code セッションディレクトリ（デフォルト: `~/.claude`） |
 | `-dump` | TUI を起動せず、パース結果を一度だけテキスト出力する |
+| `-version` | バージョンを表示して終了する |
 
 ### サブコマンド
 

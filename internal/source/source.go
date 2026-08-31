@@ -71,7 +71,8 @@ func (s *Source) Load() LoadResult {
 			continue // registry が残っているだけの終了済みセッションは表示しない
 		}
 
-		lastActivity, aiTitle, model := s.loadActivity(e.CWD, e.SessionID)
+		actionRequiredAt := actionRequiredTimes[e.SessionID] // 無ければゼロ値
+		activity := s.loadActivity(e.CWD, e.SessionID, actionRequiredAt)
 		procStart, _ := e.procStartTime()
 
 		sess := session.Session{
@@ -83,15 +84,16 @@ func (s *Source) Load() LoadResult {
 			RawStatus:    e.Status,
 			Entrypoint:   e.Entrypoint,
 			RegistryName: e.RegistryName,
-			AITitle:      aiTitle,
-			Model:        model,
-			LastActivity: lastActivity,
+			AITitle:      activity.aiTitle,
+			Model:        activity.model,
+			LastActivity: activity.lastActivity,
 			GitBranch:    s.branchOf(e.CWD),
 		}
 		sess.State = session.DeriveState(session.StateInput{
-			RawStatus:        sess.RawStatus,
-			Now:              now,
-			ActionRequiredAt: actionRequiredTimes[e.SessionID], // 無ければゼロ値
+			RawStatus:         sess.RawStatus,
+			Now:               now,
+			ActionRequiredAt:  actionRequiredAt,
+			HasPendingToolUse: activity.hasPendingToolUse,
 		})
 		sessions = append(sessions, sess)
 	}

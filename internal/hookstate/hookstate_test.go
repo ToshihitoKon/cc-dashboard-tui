@@ -8,11 +8,13 @@ import (
 	"time"
 )
 
+const testTTL = 30 * time.Minute
+
 func Test_Write_ValidSessionID_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	Write(dir, "abc-123", now)
+	Write(dir, "abc-123", now, testTTL)
 
 	path := filepath.Join(dir, "sessions", "abc-123.json")
 	data, err := os.ReadFile(path)
@@ -34,7 +36,7 @@ func Test_Write_ValidSessionID_CreatesFile(t *testing.T) {
 
 func Test_Write_NoTempFileLeftBehind(t *testing.T) {
 	dir := t.TempDir()
-	Write(dir, "abc-123", time.Now())
+	Write(dir, "abc-123", time.Now(), testTTL)
 
 	entries, err := os.ReadDir(filepath.Join(dir, "sessions"))
 	if err != nil {
@@ -51,7 +53,7 @@ func Test_Write_NoTempFileLeftBehind(t *testing.T) {
 func Test_Write_PathTraversalSessionID_IsRejected(t *testing.T) {
 	dir := t.TempDir()
 
-	Write(dir, "../../etc/passwd", time.Now())
+	Write(dir, "../../etc/passwd", time.Now(), testTTL)
 
 	// sessions/ ディレクトリ自体が作られていないはず（不正な sessionId は
 	// MkdirAll より前に弾かれる）。
@@ -66,12 +68,40 @@ func Test_Write_PathTraversalSessionID_IsRejected(t *testing.T) {
 
 func Test_Clear_RemovesFile(t *testing.T) {
 	dir := t.TempDir()
-	Write(dir, "abc-123", time.Now())
+	Write(dir, "abc-123", time.Now(), testTTL)
 
 	Clear(dir, "abc-123")
 
 	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); !os.IsNotExist(err) {
 		t.Errorf("Clear 後もファイルが残っている: err=%v", err)
+	}
+}
+
+func Test_Write_PrunesExpiredFilesOfOtherSessions(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	Write(dir, "expired-session", old, testTTL)
+
+	now := old.Add(testTTL + time.Minute)
+	Write(dir, "new-session", now, testTTL)
+
+	if _, err := os.Stat(filepath.Join(dir, "sessions", "expired-session.json")); !os.IsNotExist(err) {
+		t.Errorf("TTL 超過ファイルが削除されていない: err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sessions", "new-session.json")); err != nil {
+		t.Errorf("新規ファイルまで消えている: %v", err)
+	}
+}
+
+func Test_Write_KeepsFilesWithinTTL(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	Write(dir, "recent-session", base, testTTL)
+
+	Write(dir, "new-session", base.Add(time.Minute), testTTL)
+
+	if _, err := os.Stat(filepath.Join(dir, "sessions", "recent-session.json")); err != nil {
+		t.Errorf("TTL 内のファイルが消えてしまっている: %v", err)
 	}
 }
 

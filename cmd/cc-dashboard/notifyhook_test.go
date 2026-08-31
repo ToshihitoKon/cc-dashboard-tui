@@ -19,7 +19,9 @@ func Test_RunNotifyHook_PermissionPrompt_WritesStateFile(t *testing.T) {
 	}
 }
 
-func Test_RunNotifyHook_IdlePrompt_ClearsStateFile(t *testing.T) {
+func Test_RunNotifyHook_IdlePrompt_DoesNotClearStateFile(t *testing.T) {
+	// 解除は本体 jsonl 上の未解決 tool_use の有無で構造的に判定するため、
+	// idle_prompt を含むどの hook イベントも状態ファイルを解除しない。
 	dir := t.TempDir()
 	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
 	runNotifyHook(strings.NewReader(write), dir, time.Now())
@@ -27,83 +29,38 @@ func Test_RunNotifyHook_IdlePrompt_ClearsStateFile(t *testing.T) {
 	clear := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"idle_prompt"}`
 	runNotifyHook(strings.NewReader(clear), dir, time.Now())
 
-	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); !os.IsNotExist(err) {
-		t.Errorf("idle_prompt で状態ファイルが解除されるべき: err=%v", err)
-	}
-}
-
-func Test_RunNotifyHook_PostToolUse_ClearsStateFile(t *testing.T) {
-	// PostToolUse はツールが実行された＝許可されたことを示す最も直接的な
-	// 解除信号。これが無いと承認後も action-required 表示が残り続ける。
-	dir := t.TempDir()
-	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
-	runNotifyHook(strings.NewReader(write), dir, time.Now())
-
-	clear := `{"session_id":"abc-123","hook_event_name":"PostToolUse"}`
-	runNotifyHook(strings.NewReader(clear), dir, time.Now())
-
-	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); !os.IsNotExist(err) {
-		t.Errorf("PostToolUse で状態ファイルが解除されるべき: err=%v", err)
-	}
-}
-
-func Test_RunNotifyHook_SubagentPostToolUse_DoesNotClearMainSessionStateFile(t *testing.T) {
-	// PreToolUse/PostToolUse はサブエージェント実行中も同じ session_id で
-	// 発火する。agent_id が付いている＝サブエージェント由来のイベントで
-	// メインの action-required を消してはいけない。
-	dir := t.TempDir()
-	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
-	runNotifyHook(strings.NewReader(write), dir, time.Now())
-
-	subagentEvent := `{"session_id":"abc-123","hook_event_name":"PostToolUse","agent_id":"deadbeef"}`
-	runNotifyHook(strings.NewReader(subagentEvent), dir, time.Now())
-
 	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); err != nil {
-		t.Errorf("サブエージェント由来の PostToolUse で状態ファイルが消えるべきではない: %v", err)
+		t.Errorf("idle_prompt で状態ファイルが消えるべきではない: %v", err)
 	}
 }
 
-func Test_RunNotifyHook_SubagentPreToolUse_DoesNotClearMainSessionStateFile(t *testing.T) {
-	dir := t.TempDir()
-	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
-	runNotifyHook(strings.NewReader(write), dir, time.Now())
-
-	subagentEvent := `{"session_id":"abc-123","hook_event_name":"PreToolUse","agent_id":"deadbeef"}`
-	runNotifyHook(strings.NewReader(subagentEvent), dir, time.Now())
-
-	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); err != nil {
-		t.Errorf("サブエージェント由来の PreToolUse で状態ファイルが消えるべきではない: %v", err)
+func Test_RunNotifyHook_FormerClearEvents_AreNoOp(t *testing.T) {
+	// 旧バージョンで解除トリガーとして使っていたイベント群。
+	// settings.json に残っていても無害（no-op）であることを確認する。
+	events := []string{
+		"PreToolUse",
+		"PostToolUse",
+		"UserPromptSubmit",
+		"Stop",
+		"SessionEnd",
+		"SubagentStart",
+		"SubagentStop",
+		"PreCompact",
+		"SessionStart",
 	}
-}
+	for _, event := range events {
+		t.Run(event, func(t *testing.T) {
+			dir := t.TempDir()
+			write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
+			runNotifyHook(strings.NewReader(write), dir, time.Now())
 
-func Test_RunNotifyHook_UserRejectedViaPreToolUse_ClearsStateFile(t *testing.T) {
-	// ユーザーが拒否した場合、PostToolUse は来ずに次の PreToolUse や
-	// UserPromptSubmit が来ることがある（約19%のケース）。これらでも
-	// 解除できないと action-required 表示が残留する。
-	dir := t.TempDir()
-	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
-	runNotifyHook(strings.NewReader(write), dir, time.Now())
+			payload := `{"session_id":"abc-123","hook_event_name":"` + event + `"}`
+			runNotifyHook(strings.NewReader(payload), dir, time.Now())
 
-	clear := `{"session_id":"abc-123","hook_event_name":"PreToolUse"}`
-	runNotifyHook(strings.NewReader(clear), dir, time.Now())
-
-	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); !os.IsNotExist(err) {
-		t.Errorf("PreToolUse で状態ファイルが解除されるべき: err=%v", err)
-	}
-}
-
-func Test_RunNotifyHook_SubagentStop_DoesNotClearStateFile(t *testing.T) {
-	// メインセッションがパーミッション確認待ちの間にサブエージェントが
-	// 終了しても、待機状態を誤って解除してはいけない。
-	dir := t.TempDir()
-	write := `{"session_id":"abc-123","hook_event_name":"Notification","notification_type":"permission_prompt"}`
-	runNotifyHook(strings.NewReader(write), dir, time.Now())
-
-	unrelated := `{"session_id":"abc-123","hook_event_name":"SubagentStop"}`
-	runNotifyHook(strings.NewReader(unrelated), dir, time.Now())
-
-	if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); err != nil {
-		t.Errorf("SubagentStop で状態ファイルが消えるべきではない: %v", err)
+			if _, err := os.Stat(filepath.Join(dir, "sessions", "abc-123.json")); err != nil {
+				t.Errorf("%s で状態ファイルが消えるべきではない: %v", event, err)
+			}
+		})
 	}
 }
 

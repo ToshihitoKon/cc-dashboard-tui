@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +19,7 @@ func Test_ReadRegisteredHookEvents_NoFile_ReturnsEmpty(t *testing.T) {
 func Test_ReadRegisteredHookEvents_RegisteredCommand_IsDetected(t *testing.T) {
 	settings := map[string]any{
 		"hooks": map[string]any{
-			"PostToolUse": []map[string]any{
+			"Notification": []map[string]any{
 				{"hooks": []map[string]any{
 					{"type": "command", "command": "/usr/local/bin/cc-dashboard notify-hook"},
 				}},
@@ -28,15 +30,15 @@ func Test_ReadRegisteredHookEvents_RegisteredCommand_IsDetected(t *testing.T) {
 
 	got := readRegisteredHookEvents(path)
 
-	if !got["PostToolUse"] {
-		t.Errorf("registered = %v, want PostToolUse=true", got)
+	if !got["Notification"] {
+		t.Errorf("registered = %v, want Notification=true", got)
 	}
 }
 
 func Test_ReadRegisteredHookEvents_UnrelatedCommand_IsNotDetected(t *testing.T) {
 	settings := map[string]any{
 		"hooks": map[string]any{
-			"PostToolUse": []map[string]any{
+			"Notification": []map[string]any{
 				{"hooks": []map[string]any{
 					{"type": "command", "command": "~/.config/claude/custom_scripts/hook-logger.sh"},
 				}},
@@ -47,7 +49,7 @@ func Test_ReadRegisteredHookEvents_UnrelatedCommand_IsNotDetected(t *testing.T) 
 
 	got := readRegisteredHookEvents(path)
 
-	if got["PostToolUse"] {
+	if got["Notification"] {
 		t.Error("無関係なコマンドが notify-hook として誤検出されている")
 	}
 }
@@ -57,7 +59,7 @@ func Test_ReadRegisteredHookEvents_PreservesUnrelatedHooksInSameEvent(t *testing
 	// 既存の他ツールの hook を読み飛ばしつつ notify-hook だけ検出できるべき。
 	settings := map[string]any{
 		"hooks": map[string]any{
-			"PreToolUse": []map[string]any{
+			"Notification": []map[string]any{
 				{"hooks": []map[string]any{
 					{"type": "command", "command": "~/.config/claude/custom_scripts/hook-logger.sh"},
 				}},
@@ -71,22 +73,60 @@ func Test_ReadRegisteredHookEvents_PreservesUnrelatedHooksInSameEvent(t *testing
 
 	got := readRegisteredHookEvents(path)
 
-	if !got["PreToolUse"] {
+	if !got["Notification"] {
 		t.Error("他ツールの hook と共存していても notify-hook を検出できるべき")
 	}
 }
 
 func Test_BuildHookSnippet_ProducesValidJSON(t *testing.T) {
-	snippet := buildHookSnippet([]string{"Notification", "Stop"}, "/usr/local/bin/cc-dashboard")
+	snippet := buildHookSnippet([]string{"Notification"}, "/usr/local/bin/cc-dashboard")
 
 	var parsed map[string][]hookEventGroup
 	if err := json.Unmarshal([]byte(snippet), &parsed); err != nil {
 		t.Fatalf("生成されたスニペットが不正な JSON: %v\n%s", err, snippet)
 	}
-	for _, event := range []string{"Notification", "Stop"} {
-		if _, ok := parsed[event]; !ok {
-			t.Errorf("スニペットに %s が含まれていない: %s", event, snippet)
+	if _, ok := parsed["Notification"]; !ok {
+		t.Errorf("スニペットに Notification が含まれていない: %s", snippet)
+	}
+}
+
+func Test_PrintObsoleteHookAdvisory_ReportsRegisteredObsoleteEvents(t *testing.T) {
+	registered := map[string]bool{"PostToolUse": true, "Stop": true, "Notification": true}
+
+	var buf bytes.Buffer
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	printObsoleteHookAdvisory(registered)
+	w.Close()
+	os.Stdout = old
+	buf.ReadFrom(r)
+	out := buf.String()
+
+	for _, event := range []string{"PostToolUse", "Stop"} {
+		if !strings.Contains(out, event) {
+			t.Errorf("出力に %s への言及が無い: %s", event, out)
 		}
+	}
+	if strings.Contains(out, "Notification") {
+		t.Errorf("現行イベント Notification は advisory に含まれるべきではない: %s", out)
+	}
+}
+
+func Test_PrintObsoleteHookAdvisory_NoOutputWhenNothingObsolete(t *testing.T) {
+	registered := map[string]bool{"Notification": true}
+
+	var buf bytes.Buffer
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	printObsoleteHookAdvisory(registered)
+	w.Close()
+	os.Stdout = old
+	buf.ReadFrom(r)
+
+	if buf.Len() != 0 {
+		t.Errorf("廃止イベントが無いのに出力がある: %q", buf.String())
 	}
 }
 

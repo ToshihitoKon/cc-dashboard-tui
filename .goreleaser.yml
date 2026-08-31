@@ -26,6 +26,8 @@ archives:
     formats: [tar.gz]
     name_template: >-
       cc-dashboard_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
 
 checksum:
   name_template: checksums.txt

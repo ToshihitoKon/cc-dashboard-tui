@@ -65,11 +65,9 @@ hook は必須ではなく、未設定でも busy/idle/unknown の表示は動�
 
 action-required の「発生」は `Notification`（`permission_prompt`）hook 1つだけで検出する。「解除」には hook を使わず、セッションの本体 jsonl 上に「action-required 発生時刻（`ActionRequiredAt`）以前に発行され、対応する `tool_result` をまだ持たない `tool_use`」が残っているかどうかで判定する。承認されてツールが完了すると `tool_result` が append され、この未解決状態が解消されると想定している（未検証。「設計上のコスト」参照）。
 
-`ActionRequiredAt` より後に発行された `tool_use` は判定に含めない。含めると、一度解除された後に無関係な別のツール呼び出しが走っただけで TTL の間ずっと action-required 表示に戻ってしまう（この回帰は実装中に一度発生し、テストで固定している）。
+`ActionRequiredAt` より後に発行された `tool_use` は判定に含めない。含めると、一度解除された後に無関係な別のツール呼び出しが走っただけで TTL の間ずっと action-required 表示に戻ってしまう。
 
-発生の検出だけは hook に残す必要がある。「未解決の `tool_use` が一定時間残っている」という経過時間だけで発生を推測する方式（stall 検出）は、このプロジェクトが過去に意図して削除した設計（`StateBusyStale`）と同じ問題（長いツール呼び出し中の busy を「止まっている」と誤認する）を再現するため避けている。
-
-以前は解除トリガーとして `PostToolUse`・`PreToolUse`・`UserPromptSubmit`・`Stop`・`SessionEnd` の5イベントを使っていたが、この判定方式ならこれらは不要になる。付随して、メイン/サブエージェントを区別するための `agent_id`（未文書化フィールド）ガードも不要になった。
+発生の検出だけは hook に残す必要がある。「未解決の `tool_use` が一定時間残っている」という経過時間だけで発生を推測する方式（stall 検出）は、長いツール呼び出し中の busy を「止まっている」と誤認してしまうため避けている。
 
 ### サブエージェントとの区別
 

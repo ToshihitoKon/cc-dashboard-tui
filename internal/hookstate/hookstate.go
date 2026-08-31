@@ -26,7 +26,11 @@ type record struct {
 // Write はセッションが action-required 状態であることを記録する。
 // sessionId が不正、またはディレクトリ作成・書き込みに失敗した場合は
 // 何もせず終了する（呼び出し元の notify-hook は常に exit 0 で返す方針のため）。
-func Write(stateDir, sessionID string, now time.Time) {
+//
+// 併せて ttl を超えた他セッションの状態ファイルを削除する。他セッション
+// で permission_prompt が発生したときにしか実行されないため、それ以降
+// 一度も発生しないセッションのファイルは残り続ける（表示には影響しない）。
+func Write(stateDir, sessionID string, now time.Time, ttl time.Duration) {
 	if stateDir == "" || !sessionIDPattern.MatchString(sessionID) {
 		return
 	}
@@ -35,6 +39,8 @@ func Write(stateDir, sessionID string, now time.Time) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
+
+	pruneExpired(dir, now, ttl)
 
 	data, err := json.Marshal(record{SessionID: sessionID, UpdatedAt: now})
 	if err != nil {
@@ -58,6 +64,38 @@ func Write(stateDir, sessionID string, now time.Time) {
 		return
 	}
 	os.Rename(tmpPath, filepath.Join(dir, sessionID+".json"))
+}
+
+// pruneExpired は dir 直下の状態ファイルのうち、updatedAt が
+// now.Add(-ttl) より前のものを削除する。読み込みに失敗したファイルは
+// 判断材料が無いため残す（誤って生きている状態を消さないため）。
+//
+// 読んだファイルそのものを os.Remove する。ファイル名と中身の sessionId
+// が一致している保証は無いため、Clear(sessionID) は使わない（一致しない
+// 場合、無関係な生きているセッションの状態ファイルを消してしまう）。
+func pruneExpired(dir string, now time.Time, ttl time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := now.Add(-ttl)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var r record
+		if err := json.Unmarshal(data, &r); err != nil {
+			continue
+		}
+		if r.UpdatedAt.Before(cutoff) {
+			os.Remove(path)
+		}
+	}
 }
 
 // Clear はセッションの action-required 状態を解除する。

@@ -13,10 +13,9 @@ const (
 )
 
 // actionRequiredTTL は action-required 状態ファイルを信用する期限。
-//
-// hook の解除イベントを取りこぼした場合（プロセスクラッシュ等）、
-// 状態ファイルが削除されないまま残り続けることがある。この期限を
-// 超えたファイルは無視し、通常の busy/idle 判定にフォールバックする。
+// パーミッション確認が拒否されて tool_result が発行されないケースの
+// フォールバック。cmd/cc-dashboard の actionRequiredStateTTL と値を
+// 一致させること（変更時は両方直す）。
 const actionRequiredTTL = 30 * time.Minute
 
 // StateInput は DeriveState への入力。フィールドを名前付きにすることで、
@@ -28,6 +27,11 @@ type StateInput struct {
 	// ActionRequiredAt は action-required 状態ファイルの記録時刻。
 	// hook が未設定、または現在パーミッション確認待ちでなければゼロ値。
 	ActionRequiredAt time.Time
+
+	// HasPendingToolUse は本体 jsonl 上に、対応する tool_result を
+	// 持たない tool_use が残っているかどうか。action-required の
+	// 「解除」判定にのみ使う。true の間は確認待ちが続いていると見なす。
+	HasPendingToolUse bool
 }
 
 // DeriveState はセッションの表示ステータスを決める。
@@ -46,7 +50,8 @@ type StateInput struct {
 func DeriveState(in StateInput) DisplayState {
 	switch in.RawStatus {
 	case "busy":
-		if !in.ActionRequiredAt.IsZero() && in.Now.Sub(in.ActionRequiredAt) <= actionRequiredTTL {
+		if !in.ActionRequiredAt.IsZero() && in.HasPendingToolUse &&
+			in.Now.Sub(in.ActionRequiredAt) <= actionRequiredTTL {
 			return StateActionRequired
 		}
 		return StateBusy

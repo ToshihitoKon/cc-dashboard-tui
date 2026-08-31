@@ -53,7 +53,7 @@ cc-dashboard -root /path/to/claude/dir
 | `hook-status` | action-required hook が設定済みか確認する |
 | `notify-hook` | Claude Code の hooks から呼び出されるエントリポイント（手動実行は不要） |
 
-action-required の検出精度を上げるには、`cc-dashboard hook-status` の案内に従って `~/.claude/settings.json` に notify-hook を登録してください。
+action-required の検出精度を上げるには、`cc-dashboard hook-status` の案内に従って `~/.claude/settings.json` に notify-hook を登録してください。registry の情報だけでは「実際に処理中」か「パーミッション確認待ちで止まっている」かを区別できないため、hook を登録すると後者を action-required として検出できるようになります。hook は任意（opt-in）で、未設定でも他の状態表示は通常通り動作します。
 
 ## 開発
 

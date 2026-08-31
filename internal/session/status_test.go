@@ -39,9 +39,10 @@ func Test_DeriveState_ActionRequiredWithinTTL_OverridesBusy(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
 
 	got := DeriveState(StateInput{
-		RawStatus:        "busy", // 通知直後は registry 上まだ busy のことが多い
-		Now:              now,
-		ActionRequiredAt: now.Add(-time.Minute),
+		RawStatus:         "busy", // 通知直後は registry 上まだ busy のことが多い
+		Now:               now,
+		ActionRequiredAt:  now.Add(-time.Minute),
+		HasPendingToolUse: true,
 	})
 
 	if got != StateActionRequired {
@@ -53,9 +54,10 @@ func Test_DeriveState_ActionRequiredAtThresholdBoundary_StillActionRequired(t *t
 	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
 
 	got := DeriveState(StateInput{
-		RawStatus:        "busy",
-		Now:              now,
-		ActionRequiredAt: now.Add(-actionRequiredTTL), // ちょうど TTL は境界内
+		RawStatus:         "busy",
+		Now:               now,
+		ActionRequiredAt:  now.Add(-actionRequiredTTL), // ちょうど TTL は境界内
+		HasPendingToolUse: true,
 	})
 
 	if got != StateActionRequired {
@@ -67,13 +69,31 @@ func Test_DeriveState_ActionRequiredBeyondTTL_FallsBackToRawStatus(t *testing.T)
 	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
 
 	got := DeriveState(StateInput{
-		RawStatus:        "busy",
-		Now:              now,
-		ActionRequiredAt: now.Add(-actionRequiredTTL - time.Second),
+		RawStatus:         "busy",
+		Now:               now,
+		ActionRequiredAt:  now.Add(-actionRequiredTTL - time.Second),
+		HasPendingToolUse: true,
 	})
 
 	if got != StateBusy {
-		t.Errorf("DeriveState() = %v, want StateBusy（TTL 超過で通常判定にフォールバックすべき）", got)
+		t.Errorf("DeriveState() = %v, want StateBusy（TTL 超過で通常判定にフォールバックすべき。tool_use が拒否されて未解決のまま残るケースの保険）", got)
+	}
+}
+
+func Test_DeriveState_NoPendingToolUse_ReturnsBusy(t *testing.T) {
+	// 承認されてツールが完了し tool_result が append された後は
+	// action-required を解除し、通常の busy 判定に戻るべき。
+	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
+
+	got := DeriveState(StateInput{
+		RawStatus:         "busy",
+		Now:               now,
+		ActionRequiredAt:  now.Add(-time.Minute),
+		HasPendingToolUse: false,
+	})
+
+	if got != StateBusy {
+		t.Errorf("DeriveState() = %v, want StateBusy（未解決の tool_use が無ければ解除されるべき）", got)
 	}
 }
 

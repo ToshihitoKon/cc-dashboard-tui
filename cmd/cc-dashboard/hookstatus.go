@@ -10,10 +10,17 @@ import (
 
 // requiredHookEvents は action-required 検出に必要な hook イベント。
 //
-// PreToolUse/PostToolUse/UserPromptSubmit/Stop/SessionEnd は
-// action-required の「解除」検出に、Notification は「発生」検出に使う。
+// 「発生」は Notification で検出する。「解除」は本体 jsonl 上の
+// 未解決 tool_use の有無で構造的に判定するため、hook イベントは不要。
 var requiredHookEvents = []string{
 	"Notification",
+}
+
+// obsoleteHookEvents は過去のバージョンで登録を案内していたが、
+// 現在は notify-hook が参照しないイベント。settings.json に残っていても
+// 無害（notify-hook が no-op で無視する）だが、無駄なプロセス起動を
+// 避けるため削除を促す。
+var obsoleteHookEvents = []string{
 	"PreToolUse",
 	"PostToolUse",
 	"UserPromptSubmit",
@@ -63,11 +70,34 @@ func runHookStatus() {
 
 	if len(missing) == 0 {
 		fmt.Println("\nAll hooks are configured.")
+	} else {
+		fmt.Printf("\nAdd the following to the hooks in %s (using %s):\n", settingsPath, exe)
+		fmt.Println(buildHookSnippet(missing, exe))
+	}
+
+	printObsoleteHookAdvisory(registered)
+}
+
+// printObsoleteHookAdvisory は、もう参照されなくなった旧イベントが
+// settings.json に登録済みのままなら削除を促す案内を出す。
+// これらは notify-hook が no-op で無視するため動作に支障はないが、
+// ツール呼び出しのたびに無駄なプロセスが起動され続ける。
+func printObsoleteHookAdvisory(registered map[string]bool) {
+	var obsolete []string
+	for _, event := range obsoleteHookEvents {
+		if registered[event] {
+			obsolete = append(obsolete, event)
+		}
+	}
+	if len(obsolete) == 0 {
 		return
 	}
 
-	fmt.Printf("\nAdd the following to the hooks in %s (using %s):\n", settingsPath, exe)
-	fmt.Println(buildHookSnippet(missing, exe))
+	fmt.Println("\nnote: the following events are registered but no longer used by cc-dashboard")
+	fmt.Println("and can be safely removed from settings.json:")
+	for _, event := range obsolete {
+		fmt.Printf("  - %s\n", event)
+	}
 }
 
 // readRegisteredHookEvents は settings.json を読み、各イベントに

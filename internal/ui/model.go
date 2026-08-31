@@ -244,8 +244,22 @@ const longRunThreshold = 5 * time.Minute
 
 // isLongRun は busy 状態が longRunThreshold を超えて続いているかを返す。
 // busy 以外の状態には注意喚起の意味がないため常に false。
+//
+// LastActivity がゼロ値（起動直後で jsonl がまだ存在せず取得に失敗した場合）は
+// now との差分が time.Duration の最大値にサチュレートされ、長時間run扱いに
+// 誤判定されてしまうため除外する。
 func isLongRun(s session.Session, now time.Time) bool {
-	return s.State == session.StateBusy && now.Sub(s.LastActivity) > longRunThreshold
+	return s.State == session.StateBusy && !s.LastActivity.IsZero() && now.Sub(s.LastActivity) > longRunThreshold
+}
+
+// elapsedLabel は LastActivity からの経過時間を表示用文字列にする。
+// ゼロ値（起動直後で jsonl の取得に失敗した場合）は経過時間が意味を持たないため、
+// modelOrPlaceholder と同じ「不明はハイフン」の表示規約に合わせる。
+func elapsedLabel(lastActivity, now time.Time) string {
+	if lastActivity.IsZero() {
+		return "-"
+	}
+	return session.FormatElapsed(now.Sub(lastActivity))
 }
 
 func (m Model) renderSession(s session.Session, now time.Time) string {
@@ -254,11 +268,13 @@ func (m Model) renderSession(s session.Session, now time.Time) string {
 		icon = m.spinner.View()
 	}
 
-	elapsed := session.FormatElapsed(now.Sub(s.LastActivity))
-	statusCell := statusColStyle.Render(fmt.Sprintf("%s %s (%s)", icon, s.State.Label(), elapsed))
+	// icon はスピナー（ANSIエスケープを含みうる）なので truncate の対象から外し、
+	// テキスト部分だけを切り詰める。
+	label := truncate(fmt.Sprintf("%s (%s)", s.State.Label(), elapsedLabel(s.LastActivity, now)), statusColWidth-2)
+	statusCell := statusColStyle.Render(icon + " " + label)
 	titleCell := titleColStyle.Render(truncate(s.DisplayName(), titleColWidth))
 	modelCell := modelColStyle.Render(truncate(modelOrPlaceholder(s.DisplayModel()), modelColWidth))
-	startedCell := startedColStyle.Render(session.FormatElapsed(now.Sub(s.StartedAt)) + " ago")
+	startedCell := startedColStyle.Render(truncate(session.FormatElapsed(now.Sub(s.StartedAt))+" ago", startedColWidth))
 
 	line := strings.Join([]string{statusCell, titleCell, modelCell, startedCell}, "  ")
 	return statusStyle(s.State, isLongRun(s, now)).Render(line)

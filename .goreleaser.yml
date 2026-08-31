@@ -41,6 +41,7 @@ changelog:
 
 brews:
   - name: cc-dashboard
+    skip_upload: true # ToshihitoKon/homebrew-tap をまだ公開しないため無効化
     repository:
       owner: ToshihitoKon
       name: homebrew-tap

@@ -30,6 +30,9 @@ archives:
 checksum:
   name_template: checksums.txt
 
+release:
+  prerelease: auto # v1.0.0-alpha.1 のような prerelease タグは GitHub Release でも prerelease 表示にする
+
 changelog:
   sort: asc
   filters:

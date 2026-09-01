@@ -173,7 +173,9 @@ func extractJSONLFields(fsys fs.FS, jsonlPath string) (aiTitle, model string, pe
 
 	scanner := bufio.NewScanner(f)
 	// セッションログの 1 行が bufio のデフォルト上限(64KiB)を超えることがあるため広げる。
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// 巨大な tool_result（大きなファイルの Read 結果等）で数 MiB に達することがあるため、
+	// 上限自体も余裕を持たせる。
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		var line jsonlLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
@@ -205,6 +207,14 @@ func extractJSONLFields(fsys fs.FS, jsonlPath string) (aiTitle, model string, pe
 				delete(pendingByID, c.ToolUseID)
 			}
 		}
+	}
+
+	if scanner.Err() != nil {
+		// バッファ上限超過等でスキャンが途中終了した場合、それ以降の
+		// tool_result を読めておらず pendingByID は不完全になる。
+		// 誤って古い tool_use を pending 扱いにして action-required を
+		// 固着させないよう、判定不能として空を返す（安全側）。
+		return aiTitle, model, nil
 	}
 
 	pending = make([]pendingToolUse, 0, len(pendingByID))

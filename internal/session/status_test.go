@@ -25,6 +25,32 @@ func Test_DeriveState_Idle_ReturnsIdle(t *testing.T) {
 	}
 }
 
+func Test_DeriveState_Waiting_ReturnsActionRequired(t *testing.T) {
+	now := time.Now()
+
+	got := DeriveState(StateInput{RawStatus: "waiting", Now: now})
+
+	if got != StateActionRequired {
+		t.Errorf("DeriveState() = %v, want StateActionRequired（waiting は hook 不要で action-required とする実装）", got)
+	}
+}
+
+func Test_DeriveState_WaitingWithStaleActionRequiredAt_StillActionRequired(t *testing.T) {
+	// waiting は busy と異なり TTL の対象外という実装。hookstate が無くても、
+	// あるいは古くても常に action-required になる。
+	now := time.Date(2026, 1, 1, 0, 10, 0, 0, time.UTC)
+
+	got := DeriveState(StateInput{
+		RawStatus:        "waiting",
+		Now:              now,
+		ActionRequiredAt: now.Add(-actionRequiredTTL - time.Second), // TTL を過ぎていても無関係
+	})
+
+	if got != StateActionRequired {
+		t.Errorf("DeriveState() = %v, want StateActionRequired（waiting に TTL は適用されない）", got)
+	}
+}
+
 func Test_DeriveState_EmptyStatus_ReturnsUnknown(t *testing.T) {
 	now := time.Now()
 

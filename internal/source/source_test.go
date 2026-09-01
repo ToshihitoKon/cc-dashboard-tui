@@ -2,6 +2,7 @@ package source
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -360,6 +361,37 @@ func Test_LoadActivity_ToolUseAfterActionRequiredAt_HasPendingToolUseIsFalse(t *
 	}
 }
 
+func Test_LoadActivity_LineExceedsScannerBuffer_DoesNotLatchStalePendingToolUse(t *testing.T) {
+	// 巨大な tool_result（大きなファイルの Read 結果等）1 行が
+	// bufio.Scanner のバッファ上限を超えると、それ以降の行は一切
+	// 読まれない。この時点で pendingByID に残っていた古い tool_use を
+	// そのまま返すと、対応する tool_result がずっと後続の行にあっても
+	// 永遠に「未解決」扱いになり、action-required が固着してしまう。
+	// スキャンが不完全に終わった場合は判定不能として false を返すべき。
+	staleToolUseTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	actionRequiredAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	hugeLine := `{"type":"user","message":{"content":"` + strings.Repeat("x", 20*1024*1024) + `"}}`
+
+	fsys := fstest.MapFS{
+		"projects/-tmp-proj/aaa.jsonl": &fstest.MapFile{
+			Data: []byte(
+				`{"type":"assistant","timestamp":"` + staleToolUseTime.Format(time.RFC3339) + `","message":{"content":[{"type":"tool_use","id":"toolu_stale"}]}}` + "\n" +
+					hugeLine + "\n" +
+					`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_stale"}]}}` + "\n",
+			),
+			ModTime: time.Now(),
+		},
+	}
+	src := newTestSource(fsys)
+
+	got := src.loadActivity("/tmp/proj", "aaa", actionRequiredAt)
+
+	if got.hasPendingToolUse {
+		t.Error("hasPendingToolUse = true, want false（スキャン打ち切りで不完全な pending を action-required 扱いしてはいけない）")
+	}
+}
+
 func Test_Load_ActionRequiredStateFile_IsReflectedInDerivedState(t *testing.T) {
 	// 確認プロンプト発生後、まだツールが実行されていない
 	// （tool_result が無い）状態を模す。tool_use は state file の
@@ -592,5 +624,25 @@ func Test_Load_NoStateDir_BusyStatus_FallsBackToRawStatus(t *testing.T) {
 	}
 	if got := result.Sessions[0].State; got != session.StateBusy {
 		t.Errorf("State = %v, want StateBusy（hook 未設定でも従来通り動くべき）", got)
+	}
+}
+
+func Test_Load_WaitingStatus_IsActionRequiredWithoutStateFile(t *testing.T) {
+	fsys := fstest.MapFS{
+		"sessions/1001.json": &fstest.MapFile{
+			Data: []byte(registryJSON(1001, "aaa", "/tmp/proj", "waiting")),
+		},
+	}
+	// stateFsys が空（hook 未設定）でも、waiting は registry だけで
+	// action-required と判定される実装になっている。
+	src := newTestSourceWithState(fsys, fstest.MapFS{}, 1001)
+
+	result := src.Load()
+
+	if len(result.Sessions) != 1 {
+		t.Fatalf("Sessions = %d 件, want 1", len(result.Sessions))
+	}
+	if got := result.Sessions[0].State; got != session.StateActionRequired {
+		t.Errorf("State = %v, want StateActionRequired（hook 未設定でも waiting は検出されるべき）", got)
 	}
 }

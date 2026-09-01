@@ -20,7 +20,7 @@ type Session struct {
 	CWD          string // 実パス。projects/ のディレクトリ名からの逆変換はしない
 	StartedAt    time.Time
 	ProcStart    time.Time // PID 再利用を検出するための照合用
-	RawStatus    string    // "busy" / "idle" / "" (キー欠損)
+	RawStatus    string    // "busy" / "idle" / "waiting" / "" (キー欠損)
 	Entrypoint   string    // "cli" / "sdk-cli"
 	RegistryName string
 

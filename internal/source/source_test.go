@@ -594,3 +594,23 @@ func Test_Load_NoStateDir_BusyStatus_FallsBackToRawStatus(t *testing.T) {
 		t.Errorf("State = %v, want StateBusy（hook 未設定でも従来通り動くべき）", got)
 	}
 }
+
+func Test_Load_WaitingStatus_IsActionRequiredWithoutStateFile(t *testing.T) {
+	fsys := fstest.MapFS{
+		"sessions/1001.json": &fstest.MapFile{
+			Data: []byte(registryJSON(1001, "aaa", "/tmp/proj", "waiting")),
+		},
+	}
+	// stateFsys が空（hook 未設定）でも、waiting は registry だけで
+	// action-required と判定される実装になっている。
+	src := newTestSourceWithState(fsys, fstest.MapFS{}, 1001)
+
+	result := src.Load()
+
+	if len(result.Sessions) != 1 {
+		t.Fatalf("Sessions = %d 件, want 1", len(result.Sessions))
+	}
+	if got := result.Sessions[0].State; got != session.StateActionRequired {
+		t.Errorf("State = %v, want StateActionRequired（hook 未設定でも waiting は検出されるべき）", got)
+	}
+}

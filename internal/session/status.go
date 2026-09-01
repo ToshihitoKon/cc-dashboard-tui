@@ -39,8 +39,14 @@ type StateInput struct {
 // registry の status が "busy" の場合、それが本当に処理中なのか
 // パーミッション確認待ちで止まっているのかを registry だけでは
 // 区別できない。hook 由来の action-required 情報（あれば）はこの
-// 一点を補うためだけに参照する。idle/unknown は registry だけで
-// 判断が完結するため hook を見ない。
+// 一点を補うためだけに参照する。
+//
+// status が "waiting" の場合は registry だけで判断が完結するとみなし、
+// hook の有無や TTL を問わず常に action-required とする。実機で観測できた
+// のは waitingFor:"permission prompt" が付随する1セッションのみで、waiting
+// が他の待ち状態にも使われる可能性は未検証。別の意味で使われていることが
+// 分かれば waitingFor の値による分岐に切り替える必要がある。
+// idle/unknown も registry だけで判断が完結するため hook を見ない。
 //
 // 注意: jsonl の mtime は「最後に完了したイベントの時刻」でしかなく、
 // 生成中かどうかのハートビートではない。長いツール呼び出し1回で
@@ -57,6 +63,8 @@ func DeriveState(in StateInput) DisplayState {
 		return StateBusy
 	case "idle":
 		return StateIdle
+	case "waiting":
+		return StateActionRequired
 	default:
 		// sdk-cli 起動のセッションは status キー自体が無い。
 		// 状態が分からないことを Idle に潰さず、そのまま表示する。

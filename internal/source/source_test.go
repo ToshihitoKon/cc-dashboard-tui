@@ -2,6 +2,7 @@ package source
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -357,6 +358,37 @@ func Test_LoadActivity_ToolUseAfterActionRequiredAt_HasPendingToolUseIsFalse(t *
 
 	if got.hasPendingToolUse {
 		t.Error("hasPendingToolUse = true, want false（action-required 発生後の無関係な tool_use は対象外であるべき）")
+	}
+}
+
+func Test_LoadActivity_LineExceedsScannerBuffer_DoesNotLatchStalePendingToolUse(t *testing.T) {
+	// 巨大な tool_result（大きなファイルの Read 結果等）1 行が
+	// bufio.Scanner のバッファ上限を超えると、それ以降の行は一切
+	// 読まれない。この時点で pendingByID に残っていた古い tool_use を
+	// そのまま返すと、対応する tool_result がずっと後続の行にあっても
+	// 永遠に「未解決」扱いになり、action-required が固着してしまう。
+	// スキャンが不完全に終わった場合は判定不能として false を返すべき。
+	staleToolUseTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	actionRequiredAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	hugeLine := `{"type":"user","message":{"content":"` + strings.Repeat("x", 20*1024*1024) + `"}}`
+
+	fsys := fstest.MapFS{
+		"projects/-tmp-proj/aaa.jsonl": &fstest.MapFile{
+			Data: []byte(
+				`{"type":"assistant","timestamp":"` + staleToolUseTime.Format(time.RFC3339) + `","message":{"content":[{"type":"tool_use","id":"toolu_stale"}]}}` + "\n" +
+					hugeLine + "\n" +
+					`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_stale"}]}}` + "\n",
+			),
+			ModTime: time.Now(),
+		},
+	}
+	src := newTestSource(fsys)
+
+	got := src.loadActivity("/tmp/proj", "aaa", actionRequiredAt)
+
+	if got.hasPendingToolUse {
+		t.Error("hasPendingToolUse = true, want false（スキャン打ち切りで不完全な pending を action-required 扱いしてはいけない）")
 	}
 }
 

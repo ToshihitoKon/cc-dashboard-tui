@@ -46,10 +46,10 @@ changelog:
 
 brews:
   - name: cc-dashboard
-    skip_upload: true # ToshihitoKon/homebrew-tap をまだ公開しないため無効化
     repository:
       owner: ToshihitoKon
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/ToshihitoKon/cc-dashboard-tui
     description: "実行中の Claude Code セッション一覧を表示する TUI"

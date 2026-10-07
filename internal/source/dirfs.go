@@ -27,10 +27,10 @@ func newDirFS(root string) fs.FS {
 
 // unresolvableStateDir は XDG state ディレクトリが解決できなかった場合に
 // 使う、存在しないことが保証されたパス。fs.ReadDir が fs.ErrNotExist を
-// 返すだけになり、hook 機能が使えないだけで致命的にはならない。
+// 返すだけになり、hook 機能や使用率の表示が使えないだけで致命的にはならない。
 const unresolvableStateDir = "/nonexistent-cc-dashboard-state-dir"
 
-// newStateFS は action-required 状態ファイル用の fs.FS を開く。
+// newStateFS は action-required 状態ファイルと使用率の記録ファイル用の fs.FS を開く。
 func newStateFS() fs.FS {
 	dir := xdgstate.ResolveDir()
 	if dir == "" {

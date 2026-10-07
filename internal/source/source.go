@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ToshihitoKon/cc-dashboard-tui/internal/session"
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/usage"
 )
 
 // Source は Claude Code のセッション情報ディレクトリから
@@ -15,8 +16,9 @@ type Source struct {
 	now  func() time.Time
 
 	// stateFsys は hookstate パッケージが書き込む action-required 状態
-	// ファイルの木。fsys（~/.claude 相当）とは別の場所（XDG state
-	// ディレクトリ）を指す。hook 未設定なら中身が空でもよい。
+	// ファイルと、usage パッケージが書き込む使用率の記録ファイルの木。
+	// fsys（~/.claude 相当）とは別の場所（XDG state ディレクトリ）を指す。
+	// hook や record-usage が未設定なら中身が空でもよい。
 	stateFsys fs.FS
 
 	// activityCache は jsonl の mtime をキーにした ai-title の再抽出防止キャッシュ。
@@ -54,6 +56,9 @@ type LoadResult struct {
 	// Errors は個別ファイルの読み込み失敗（basename とエラー種別のみ）。
 	// 全体を止めるほどではない部分的な失敗を表示側に伝えるためのもの。
 	Errors []error
+	// RateLimits は record-usage が記録したサブスクリプションの使用率。
+	// 記録が無ければ空。
+	RateLimits usage.Limits
 }
 
 // Load は実行中セッションの一覧を返す。
@@ -99,7 +104,7 @@ func (s *Source) Load() LoadResult {
 	}
 
 	session.SortSessions(sessions)
-	return LoadResult{Sessions: sessions, Errors: errs}
+	return LoadResult{Sessions: sessions, Errors: errs, RateLimits: usage.Load(s.stateFsys)}
 }
 
 func (s *Source) branchOf(cwd string) string {

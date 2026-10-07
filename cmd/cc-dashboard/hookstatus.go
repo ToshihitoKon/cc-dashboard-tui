@@ -3,9 +3,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/session"
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/usage"
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/xdgstate"
 )
 
 // requiredHookEvents は action-required 検出に必要な hook イベント。
@@ -76,6 +82,99 @@ func runHookStatus() {
 	}
 
 	printObsoleteHookAdvisory(registered)
+
+	printUsageRecordStatus(os.Stdout, settingsPath, exe, xdgstate.ResolveDir(), time.Now())
+}
+
+// settingsStatusLine は ~/.claude/settings.json の statusLine キーの必要部分のみ。
+type settingsStatusLine struct {
+	StatusLine *struct {
+		Command string `json:"command"`
+	} `json:"statusLine"`
+}
+
+// printUsageRecordStatus は footer の使用率表示に必要な statusLine 連携の状況を出す。
+//
+// statusLine のスクリプト内やプロジェクト側の settings.json で record-usage を呼ぶ
+// 構成もあり、ユーザー設定のコマンド文字列だけでは判定しきれない。そのため
+// リセット前の値が記録されていれば連携できているとみなし、追記の案内は出さない。
+func printUsageRecordStatus(w io.Writer, settingsPath, exe, stateDir string, now time.Time) {
+	fmt.Fprintln(w, "\nusage record (record-usage) status:")
+
+	command, isConfigured := readStatusLineCommand(settingsPath)
+	callsRecordUsage := isRecordUsageCommand(command)
+	switch {
+	case callsRecordUsage:
+		fmt.Fprintln(w, "  [ok] statusLine calls record-usage")
+	case isConfigured:
+		fmt.Fprintln(w, "  [--] statusLine does not call record-usage directly")
+	default:
+		fmt.Fprintln(w, "  [--] statusLine (not configured)")
+	}
+
+	isRecording := stateDir != "" && usage.Load(os.DirFS(stateDir)).HasActiveWindow(now)
+	if isRecording {
+		fmt.Fprint(w, "  [ok] usage recorded")
+		if recordedAt, ok := usage.LastRecordedAt(stateDir); ok {
+			fmt.Fprintf(w, " (last updated %s ago)", session.FormatElapsed(now.Sub(recordedAt)))
+		}
+		fmt.Fprintln(w)
+	} else {
+		fmt.Fprintln(w, "  [--] no current usage record (recorded after the first API response on a Pro/Max plan)")
+	}
+
+	if isRecording || callsRecordUsage {
+		return
+	}
+	if isConfigured {
+		// 既存コマンドは複合コマンドのこともあり、前にパイプを足すだけでは壊れうるため具体例に埋め込まない。
+		fmt.Fprintf(w, "\nPipe the statusLine input through record-usage before your existing command in %s,\n", settingsPath)
+		fmt.Fprintln(w, "or call it inside your statusLine script:")
+		fmt.Fprintf(w, "  %s record-usage | <existing statusLine command>\n", exe)
+		return
+	}
+	fmt.Fprintf(w, "\nAdd the following to %s (using %s):\n", settingsPath, exe)
+	fmt.Fprintln(w, buildStatusLineSnippet(exe))
+}
+
+// readStatusLineCommand は settings.json の statusLine のコマンドを返す。
+// statusLine が無い・ファイルが読めない場合は false。
+func readStatusLineCommand(settingsPath string) (string, bool) {
+	raw, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return "", false
+	}
+	var settings settingsStatusLine
+	if err := json.Unmarshal(raw, &settings); err != nil || settings.StatusLine == nil {
+		return "", false
+	}
+	return settings.StatusLine.Command, true
+}
+
+// isRecordUsageCommand はコマンド文字列が本アプリの record-usage 呼び出しを含むかを判定する。
+// isNotifyHookCommand と同じく、絶対パスやパイプの付き方の違いを吸収するため部分一致で緩く判定する。
+func isRecordUsageCommand(command string) bool {
+	return strings.Contains(command, "cc-dashboard") && strings.Contains(command, "record-usage")
+}
+
+// buildStatusLineSnippet は statusLine 未設定のときの追記用 JSON 片を組み立てる。
+// record-usage は入力をそのまま stdout に流すため、捨てないと JSON が表示されてしまう。
+func buildStatusLineSnippet(exe string) string {
+	snippet := map[string]any{
+		"statusLine": map[string]string{
+			"type":    "command",
+			"command": exe + " record-usage > /dev/null",
+		},
+	}
+	// json.Marshal は > を HTML 向けに Unicode エスケープし、貼り付ける例として読みにくくなるため無効にする。
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(snippet); err != nil {
+		return "(failed to generate JSON)"
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // printObsoleteHookAdvisory は、もう参照されなくなった旧イベントが

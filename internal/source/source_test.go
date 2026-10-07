@@ -646,3 +646,20 @@ func Test_Load_WaitingStatus_IsActionRequiredWithoutStateFile(t *testing.T) {
 		t.Errorf("State = %v, want StateActionRequired（hook 未設定でも waiting は検出されるべき）", got)
 	}
 }
+
+func Test_Load_WithUsageRecord_ReturnsRateLimits(t *testing.T) {
+	// usage.json は record-usage が state ディレクトリ直下に書き込む。
+	stateFsys := fstest.MapFS{
+		"usage.json": &fstest.MapFile{
+			Data: []byte(`{"sessions":{"aaa":{"fiveHour":{"usedPercent":42,"resetsAt":"2026-01-01T02:00:00Z",` +
+				`"observedAt":"2026-01-01T00:00:00Z"}}}}`),
+		},
+	}
+	src := newTestSourceWithState(fstest.MapFS{}, stateFsys)
+
+	result := src.Load()
+
+	if result.RateLimits.FiveHour == nil || result.RateLimits.FiveHour.UsedPercent != 42 {
+		t.Errorf("RateLimits.FiveHour = %+v, want UsedPercent 42", result.RateLimits.FiveHour)
+	}
+}

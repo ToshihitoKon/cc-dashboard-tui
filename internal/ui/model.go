@@ -6,9 +6,11 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/ToshihitoKon/cc-dashboard-tui/internal/session"
 	"github.com/ToshihitoKon/cc-dashboard-tui/internal/source"
+	"github.com/ToshihitoKon/cc-dashboard-tui/internal/usage"
 )
 
 // pollInterval はセッション一覧を再取得する間隔。
@@ -31,14 +34,28 @@ type sessionsMsg source.LoadResult
 
 // Model は TUI 全体の状態。
 type Model struct {
-	src      *source.Source
-	sessions []session.Session
-	loadErrs []error
+	src        *source.Source
+	sessions   []session.Session
+	loadErrs   []error
+	rateLimits usage.Limits
 
 	viewport viewport.Model
 	spinner  spinner.Model
+	usageBar progress.Model
 	ready    bool // 最初の WindowSizeMsg を受け取るまで viewport は使えない
+
+	// 端末のサイズ。使用率の記録の有無で footer の行数が変わったときに、
+	// WindowSizeMsg を待たずに viewport の高さを計算し直すために保持する。
+	width  int
+	height int
 }
+
+// 使用率バーの幅（文字数）の下限と上限。バーは footer の残り幅いっぱいに伸ばすが、
+// 狭い端末でも割合を読み取れる幅を残し、広い端末で間延びしないよう上限を設ける。
+const (
+	usageBarMinWidth = 5
+	usageBarMaxWidth = 40
+)
 
 // NewModel は Model を作る。
 func NewModel(src *source.Source) Model {
@@ -47,7 +64,8 @@ func NewModel(src *source.Source) Model {
 		Frames: []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"},
 		FPS:    spinnerFrameInterval,
 	}
-	return Model{src: src, spinner: sp}
+	bar := progress.New(progress.WithoutPercentage())
+	return Model{src: src, spinner: sp, usageBar: bar}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -74,12 +92,13 @@ func scheduleNextPoll(src *source.Source) tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, contentHeight(msg.Height))
+			m.viewport = viewport.New(msg.Width, m.contentHeight(time.Now()))
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
-			m.viewport.Height = contentHeight(msg.Height)
+			m.viewport.Height = m.contentHeight(time.Now())
 		}
 		m.viewport.SetContent(m.render())
 		return m, nil
@@ -96,7 +115,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case sessionsMsg:
 		m.sessions = msg.Sessions
 		m.loadErrs = msg.Errors
+		m.rateLimits = msg.RateLimits
 		if m.ready {
+			m.viewport.Height = m.contentHeight(time.Now())
 			m.viewport.SetContent(m.render())
 		}
 		return m, scheduleNextPoll(m.src)
@@ -129,9 +150,16 @@ func (m Model) hasSpinningSession() bool {
 }
 
 // contentHeight はヘッダ・フッタ分を引いた viewport の高さ。
-func contentHeight(totalHeight int) int {
-	const chromeLines = 3 // タイトル1行 + 列見出し1行 + フッタ1行
-	h := totalHeight - chromeLines
+//
+// 使用率の行は全枠がリセット時刻を過ぎると消えるため、高さの計算と View の
+// 判定で時刻がずれうる。ずれても使用率の行が消える向きにしか変わらず、
+// 画面からはみ出すことはない。
+func (m Model) contentHeight(now time.Time) int {
+	chromeLines := 3 // タイトル1行 + 列見出し1行 + フッタ1行
+	if m.rateLimits.HasActiveWindow(now) {
+		chromeLines += len(m.usageWindowViews()) // フッタの使用率の行（1 枠 1 行）
+	}
+	h := m.height - chromeLines
 	if h < 1 {
 		h = 1
 	}
@@ -146,6 +174,11 @@ func (m Model) View() string {
 		fmt.Sprintf("cc-dashboard — %d session(s) running", len(m.sessions)))
 	header := columnHeader()
 	footer := footerStyle.Render(m.footerText())
+	if now := time.Now(); m.rateLimits.HasActiveWindow(now) {
+		// 折り返すと contentHeight の行数計算がずれるため、端末幅で切り詰める。
+		usageLines := lipgloss.NewStyle().MaxWidth(m.width).Render(m.renderUsage(now))
+		footer = usageLines + "\n" + footer
+	}
 	return title + "\n" + header + "\n" + m.viewport.View() + "\n" + footer
 }
 
@@ -157,6 +190,107 @@ func (m Model) footerText() string {
 		text += fmt.Sprintf("   (%d unreadable)", len(m.loadErrs))
 	}
 	return text
+}
+
+// usageWindowView は footer に並べる 1 つの枠と、その表示方法。
+type usageWindowView struct {
+	label       string
+	window      usage.Window
+	resetLayout string // リセット日時の time.Format レイアウト
+}
+
+// usageWindowViews は footer に表示する枠を表示順に返す。記録の無い枠は含めない。
+func (m Model) usageWindowViews() []usageWindowView {
+	var views []usageWindowView
+	if w := m.rateLimits.FiveHour; w != nil {
+		views = append(views, usageWindowView{"5h", *w, "15:04"}) // 5時間以内なので日付は省く
+	}
+	if w := m.rateLimits.SevenDay; w != nil {
+		views = append(views, usageWindowView{"7d", *w, "01/02 15:04"}) // 日だけでは何の数字か分かりにくいため月/日で出す
+	}
+	return views
+}
+
+// renderUsage はサブスクリプションの 5時間・7日間の使用率を 1 枠 1 行で描画する。
+// 例:
+//
+//	5h  ███████████████░░░░░░░░░░░░░░░  52%  ↻ 13:00 (10m)
+//	7d  ███████████░░░░░░░░░░░░░░░░░░░  36%  ↻ 08/10 11:00 (22h10m)
+//
+// バーの長さは各行で揃え、バー以外の部分が最も長い行に合わせて端末幅の残りいっぱいに伸ばす。
+// バーを下限まで縮めても収まらない狭い端末では、View で行末を切り詰める。
+func (m Model) renderUsage(now time.Time) string {
+	views := m.usageWindowViews()
+
+	fixedWidth := 0
+	for _, v := range views {
+		fixedWidth = max(fixedWidth, lipgloss.Width(m.renderUsageWindow(v, 0, now)))
+	}
+	barWidth := min(max(m.width-fixedWidth, usageBarMinWidth), usageBarMaxWidth)
+
+	lines := make([]string, len(views))
+	for i, v := range views {
+		lines[i] = m.renderUsageWindow(v, barWidth, now)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderUsageWindow は 1 つの枠を "5h  ████░░░░░░  42%  ↻ 13:00 (10m)" の形にする。
+//
+// リセット時刻を過ぎた枠には、次に statusLine が新しい値を記録するまで
+// リセット前の使用率が残っている。リセット後の使用率は claude.ai など他の
+// 経路での利用も含めて分からないため、"5h  ░░░░░░░░░░   --  ↻ -" と不明扱いにする。
+func (m Model) renderUsageWindow(v usageWindowView, barWidth int, now time.Time) string {
+	bar := m.usageBar
+	bar.Width = barWidth
+	label := footerStyle.Render(v.label) + "  "
+
+	if v.window.IsExpired(now) {
+		return label + bar.ViewAs(0) + " " + footerStyle.Render("  --  ↻ -")
+	}
+
+	percent := math.Round(v.window.UsedPercent) // 79.6% を「80%」と出しつつ黄色にしないよう、色も丸めた値で決める
+	color := usageColor(percent)
+	bar.FullColor = color
+	percentText := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(fmt.Sprintf("%3.0f%%", percent))
+	resetsAt := v.window.ResetsAt.In(now.Location()).Format(v.resetLayout)
+	reset := fmt.Sprintf("↻ %s (%s)", resetsAt, formatUntilReset(v.window.ResetsAt.Sub(now)))
+
+	return label + bar.ViewAs(v.window.UsedPercent/100) + " " + percentText + "  " + footerStyle.Render(reset)
+}
+
+// 使用率の色を切り替える閾値。半分以上で注意（黄）、8 割以上で警告（赤）とし、
+// セッション一覧の配色（長時間 run の黄、action-required の赤）に揃える。
+const (
+	usageWarnPercent   = 50
+	usageDangerPercent = 80
+)
+
+func usageColor(usedPercent float64) string {
+	switch {
+	case usedPercent >= usageDangerPercent:
+		return "203"
+	case usedPercent >= usageWarnPercent:
+		return "220"
+	default:
+		return "42"
+	}
+}
+
+// formatUntilReset はリセットまでの残り時間を "45m" / "2h13m" / "3d04h" の形にする。
+// session.FormatElapsed と違い 2 単位で出すのは、"3d" のような 1 単位だと
+// 最大で 1 単位分（7日間枠なら 1 日）の誤差が出るため。
+func formatUntilReset(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "<1m"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	default:
+		return fmt.Sprintf("%dd%02dh", int(d.Hours())/24, int(d.Hours())%24)
+	}
 }
 
 // render はセッション一覧を「状態ごとのグループ見出し + 行」の形で描画する。
